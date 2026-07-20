@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar, Literal
+from pathlib import Path
+from typing import ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from git_recrypt.errors import ManifestError
 
@@ -75,6 +73,7 @@ class Manifest(BaseModel):
     key: KeyConfig
     patterns: list[str]
     named_patterns: dict[str, list[str]] | None = None
+    repo: str = "./"
     introduce_at: str = "root"
     branches: list[str] = ["HEAD"]
     exclude: list[str] = []
@@ -120,6 +119,23 @@ def load_manifest(path: Path) -> Manifest:
         return Manifest.model_validate(parsed)
     except Exception as exc:
         raise ManifestError(detail=str(exc), path=str(path)) from exc
+
+
+def resolve_repo_path(
+    manifest: Manifest, manifest_path: Path, cli_repo: str | None = None
+) -> Path:
+    """Resolve the target repo path.
+
+    Priority: CLI --repo flag > manifest repo field > default ('./').
+    Manifest-relative paths are resolved against the manifest's parent directory.
+    """
+    if cli_repo is not None:
+        return Path(cli_repo).resolve()
+    repo_str = manifest.repo
+    repo_path = Path(repo_str)
+    if repo_path.is_absolute():
+        return repo_path
+    return (manifest_path.parent / repo_path).resolve()
 
 
 def save_manifest(manifest: Manifest, path: Path) -> None:

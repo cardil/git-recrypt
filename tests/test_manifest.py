@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from git_recrypt.errors import ManifestError
-from git_recrypt.manifest import Manifest, load_manifest, save_manifest
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from git_recrypt.manifest import (
+    Manifest,
+    load_manifest,
+    resolve_repo_path,
+    save_manifest,
+)
 
 
 def _write_yaml(tmp_path: Path, content: str) -> Path:
@@ -307,3 +309,83 @@ def test_invalid_yaml(tmp_path: Path) -> None:
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
         load_manifest(path)
+
+
+def _make_manifest(**overrides: object) -> Manifest:
+    base: dict[str, object] = {
+        "version": 1,
+        "key": {"symmetric": {"key_file": "generate"}},
+        "patterns": ["*.key"],
+    }
+    base.update(overrides)
+    return Manifest.model_validate(base)
+
+
+def test_repo_default_is_dot_slash() -> None:
+    m = _make_manifest()
+    assert m.repo == "./"
+
+
+def test_resolve_repo_default_uses_manifest_parent(tmp_path: Path) -> None:
+    # Given a manifest at /some/dir/git-recrypt.yaml with default repo: ./
+    manifest_path = tmp_path / "git-recrypt.yaml"
+    m = _make_manifest()
+
+    # When resolving repo path without CLI override
+    result = resolve_repo_path(m, manifest_path)
+
+    # Then it resolves to the manifest's parent directory
+    assert result == tmp_path.resolve()
+
+
+def test_resolve_repo_relative_to_manifest(tmp_path: Path) -> None:
+    # Given a manifest with repo: ../other-repo
+    subdir = tmp_path / "configs"
+    subdir.mkdir()
+    manifest_path = subdir / "git-recrypt.yaml"
+    m = _make_manifest(repo="../other-repo")
+
+    # When resolving repo path
+    result = resolve_repo_path(m, manifest_path)
+
+    # Then it resolves relative to manifest parent, not pwd
+    assert result == (tmp_path / "other-repo").resolve()
+
+
+def test_resolve_repo_absolute_in_manifest(tmp_path: Path) -> None:
+    # Given a manifest with an absolute repo path
+    abs_repo = str(tmp_path / "my-repo")
+    manifest_path = tmp_path / "git-recrypt.yaml"
+    m = _make_manifest(repo=abs_repo)
+
+    # When resolving repo path
+    result = resolve_repo_path(m, manifest_path)
+
+    # Then the absolute path is used as-is
+    assert result == Path(abs_repo)
+
+
+def test_resolve_repo_cli_overrides_manifest(tmp_path: Path) -> None:
+    # Given a manifest with repo: ./some-dir
+    manifest_path = tmp_path / "git-recrypt.yaml"
+    m = _make_manifest(repo="./some-dir")
+
+    # When resolving with a CLI --repo override
+    cli_repo = str(tmp_path / "cli-target")
+    result = resolve_repo_path(m, manifest_path, cli_repo=cli_repo)
+
+    # Then CLI wins over manifest
+    assert result == Path(cli_repo).resolve()
+
+
+def test_repo_field_in_yaml_roundtrip(tmp_path: Path) -> None:
+    # Given a manifest with a custom repo field
+    original = _make_manifest(repo="/etc")
+    save_path = tmp_path / "roundtrip.yaml"
+
+    # When saving then loading
+    save_manifest(original, save_path)
+    loaded = load_manifest(save_path)
+
+    # Then repo field is preserved
+    assert loaded.repo == "/etc"

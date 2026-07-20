@@ -14,7 +14,7 @@ from rich.table import Table
 from git_recrypt.detector._registry import run_detection
 from git_recrypt.detector.base import Severity
 from git_recrypt.errors import DetectionError, GitRecryptError, ManifestError
-from git_recrypt.manifest import load_manifest
+from git_recrypt.manifest import load_manifest, resolve_repo_path
 from git_recrypt.patterns import PatternMatcher
 from git_recrypt.rewriter import HistoryRewriter, RewriteConfig
 from git_recrypt.verifier import RewriteVerifier, VerifyMode
@@ -89,6 +89,9 @@ def run(
     manifest: Annotated[
         str, typer.Option(help="Manifest file path")
     ] = _DEFAULT_MANIFEST,
+    repo: Annotated[
+        str | None, typer.Option(help="Target repository path (overrides manifest)")
+    ] = None,
     force: Annotated[bool, typer.Option(help="Skip confirmation")] = False,
     work_dir: Annotated[
         str | None, typer.Option(help="Working directory for clone")
@@ -96,12 +99,14 @@ def run(
     skip_verify: Annotated[bool, typer.Option(help="Skip verification")] = False,
 ) -> None:
     """Execute history rewrite from manifest."""
+    manifest_path = Path(manifest)
     try:
-        m = load_manifest(Path(manifest))
+        m = load_manifest(manifest_path)
     except ManifestError as exc:
         _console.print(f"[red]Manifest error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    repo_path = resolve_repo_path(m, manifest_path, repo)
     resolved_work_dir = (
         Path(work_dir)
         if work_dir is not None
@@ -109,6 +114,7 @@ def run(
     )
 
     if not force:
+        _console.print(f"Repository: {repo_path}")
         _console.print(f"Will rewrite [bold]{len(m.patterns)}[/bold] pattern(s)")
         _console.print(f"Work directory: {resolved_work_dir}")
 
@@ -121,7 +127,7 @@ def run(
     config = RewriteConfig(
         manifest=m,
         key_file=key_file,
-        repo_path=Path(),
+        repo_path=repo_path,
         work_dir=resolved_work_dir,
     )
 
@@ -152,7 +158,7 @@ def run(
             exclude_patterns=tuple(m.exclude),
         )
         verifier = RewriteVerifier(
-            original_path=Path(),
+            original_path=repo_path,
             rewritten_path=result.work_dir,
             key_file=key_file,
             matcher=matcher,
@@ -217,15 +223,21 @@ def dry_run(
     manifest: Annotated[
         str, typer.Option(help="Manifest file path")
     ] = _DEFAULT_MANIFEST,
+    repo: Annotated[
+        str | None, typer.Option(help="Target repository path (overrides manifest)")
+    ] = None,
 ) -> None:
     """Show what would be encrypted without modifying anything."""
+    manifest_path = Path(manifest)
     try:
-        m = load_manifest(Path(manifest))
+        m = load_manifest(manifest_path)
     except ManifestError as exc:
         _console.print(f"[red]Manifest error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    repo_path = resolve_repo_path(m, manifest_path, repo)
     _console.print(f"Manifest: {manifest}")
+    _console.print(f"Repository: {repo_path}")
     _console.print(f"Patterns: {len(m.patterns)}")
     for p in m.patterns:
         _console.print(f"  {p}")

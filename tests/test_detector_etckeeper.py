@@ -68,8 +68,19 @@ def test_detects_mysql_with_password(etckeeper_repo: Path) -> None:
     assert "mysql/debian.cnf" in high_paths
 
 
-def test_suggested_patterns_correct(etckeeper_repo: Path) -> None:
+def test_suggested_patterns_are_globs(etckeeper_repo: Path) -> None:
     result = EtcKeeperDetector().detect(etckeeper_repo)
     patterns = set(result.suggested_patterns)
+    # Should be glob patterns, not individual file paths
     assert "shadow" in patterns
-    assert "ssh/ssh_host_ed25519_key" in patterns
+    assert "gshadow" in patterns
+    assert "ssh/ssh_host_*_key" in patterns
+    # Individual file paths must NOT appear
+    assert "ssh/ssh_host_ed25519_key" not in patterns
+
+
+def test_detected_secret_suggested_pattern_is_glob(etckeeper_repo: Path) -> None:
+    result = EtcKeeperDetector().detect(etckeeper_repo)
+    ssh_secrets = [s for s in result.secrets if "ssh_host" in s.filepath]
+    assert len(ssh_secrets) == 1
+    assert ssh_secrets[0].suggested_pattern == "ssh/ssh_host_*_key"

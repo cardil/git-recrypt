@@ -19,13 +19,28 @@ if TYPE_CHECKING:
 
 ETCKEEPER_CRITICAL: Final[tuple[str, ...]] = (
     "shadow",
+    "shadow-",
     "gshadow",
+    "gshadow-",
+    "machine-id",
+    "**/*.key",
+    "**/*.key.pem",
+    "**/*.private",
+    "**/*.secret",
+    "**/*privkey*",
+    "**/secret.*",
+    "**/.htpasswd",
     "ssh/ssh_host_*_key",
     "ssl/private/**",
+    "pki/**/key/**",
+    "pki/**/private/**",
+    "pki/nssdb/**",
+    "ups/upsd.users",
+    "ups/upsmon.conf",
     "wireguard/*.conf",
-    "wireguard/*.key",
-    "openvpn/**/*.key",
     "openvpn/**/*.pem",
+    "letsencrypt/accounts/**/private_key.json",
+    "letsencrypt/keys/*.pem",
     "letsencrypt/live/**/privkey.pem",
     "letsencrypt/archive/**/privkey*.pem",
 )
@@ -33,6 +48,7 @@ ETCKEEPER_CRITICAL: Final[tuple[str, ...]] = (
 ETCKEEPER_SUSPICIOUS: Final[tuple[str, ...]] = (
     "mysql/**/*.cnf",
     "postgresql/**/*.conf",
+    "postgres/**/*.conf",
     "ldap/**/*.conf",
     "samba/**/*.conf",
     "dovecot/**/*.conf",
@@ -43,6 +59,9 @@ ETCKEEPER_SUSPICIOUS: Final[tuple[str, ...]] = (
     "environment",
     "default/**",
     "fstab",
+    "NetworkManager/system-connections/*.nmconnection",
+    "borgmatic.d/*.yaml",
+    "sasl2/*.conf",
 )
 
 # Matches lines like: password = ..., passwd=..., secret:..., etc.
@@ -53,6 +72,15 @@ _PASSWORD_RE: Final[re.Pattern[str]] = re.compile(
 
 def _build_spec(patterns: tuple[str, ...]) -> GitIgnoreSpec:
     return GitIgnoreSpec.from_lines(patterns)
+
+
+def _match_pattern(rel: str, patterns: tuple[str, ...]) -> str | None:
+    """Return the first glob pattern from *patterns* that matches *rel*."""
+    for pattern in patterns:
+        spec = GitIgnoreSpec.from_lines([pattern])
+        if spec.match_file(rel):
+            return pattern
+    return None
 
 
 def _rel(repo_path: Path, file: Path) -> str:
@@ -81,34 +109,35 @@ class EtcKeeperDetector(BaseDetector):
     @override
     def detect(self, repo_path: Path) -> DetectionResult:
         """Run etckeeper detection on the given repo."""
-        critical_spec = _build_spec(ETCKEEPER_CRITICAL)
         suspicious_spec = _build_spec(ETCKEEPER_SUSPICIOUS)
 
         secrets: list[DetectedSecret] = []
-        suggested: list[str] = []
+        suggested_set: set[str] = set()
 
         for file in repo_path.rglob("*"):
             if not file.is_file():
                 continue
             rel = _rel(repo_path, file)
 
-            if critical_spec.match_file(rel):
+            critical_glob = _match_pattern(rel, ETCKEEPER_CRITICAL)
+            if critical_glob is not None:
                 secrets.append(
                     DetectedSecret(
                         filepath=rel,
                         severity=Severity.CRITICAL,
                         reason="Critical etckeeper secret file",
-                        suggested_pattern=rel,
+                        suggested_pattern=critical_glob,
                     )
                 )
-                suggested.append(rel)
+                suggested_set.add(critical_glob)
             elif suspicious_spec.match_file(rel) and _has_password_content(file):
+                suspicious_glob = _match_pattern(rel, ETCKEEPER_SUSPICIOUS) or rel
                 secrets.append(
                     DetectedSecret(
                         filepath=rel,
                         severity=Severity.HIGH,
                         reason="Suspicious config file containing password field",
-                        suggested_pattern=rel,
+                        suggested_pattern=suspicious_glob,
                     )
                 )
 
@@ -116,6 +145,6 @@ class EtcKeeperDetector(BaseDetector):
             profile="etckeeper",
             confidence="high",
             secrets=tuple(secrets),
-            suggested_patterns=tuple(dict.fromkeys(suggested)),
+            suggested_patterns=tuple(sorted(suggested_set)),
             suggested_excludes=(),
         )
