@@ -159,7 +159,7 @@ _UPSMON_CONF = (
 
 @pytest.fixture
 def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
-    """Build a plausible etckeeper-like repo with 15 commits."""
+    """Build a plausible etckeeper-like repo with 19 commits."""
     repo = tmp_path / "etckeeper"
     repo.mkdir()
 
@@ -192,8 +192,8 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
         repo / "pki" / "ca-trust" / "extracted" / "pem" / "tls-ca-bundle.pem",
         "-----BEGIN CERTIFICATE-----\nfakecacert\n-----END CERTIFICATE-----\n",
     )
-    _write(repo / "pki" / "nssdb" / "key4.db", secrets.token_bytes(64))
-    _write(repo / "pki" / "nssdb" / "cert9.db", secrets.token_bytes(64))
+    _write(repo / "pki" / "nssdb" / "key4.db", b"\x00" + secrets.token_bytes(63))
+    _write(repo / "pki" / "nssdb" / "cert9.db", b"\x00" + secrets.token_bytes(63))
     _commit(repo, "pkg install: pki")
 
     # Commit 3: Let's Encrypt setup
@@ -294,6 +294,34 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     )
     _commit(repo, "system update: add bob")
 
+    # Commit 16: Remove PKI nssdb (package uninstall) -- deletes binary + text files
+    (repo / "pki" / "nssdb" / "key4.db").unlink()
+    (repo / "pki" / "nssdb" / "cert9.db").unlink()
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Remove nssdb package"], cwd=repo)
+
+    # Commit 17: Add systemd service symlinks and alternatives symlink
+    symdir = repo / "systemd" / "system" / "multi-user.target.wants"
+    symdir.mkdir(parents=True, exist_ok=True)
+    (symdir / "sshd.service").symlink_to("/usr/lib/systemd/system/sshd.service")
+    (symdir / "chronyd.service").symlink_to("/usr/lib/systemd/system/chronyd.service")
+    altdir = repo / "alternatives"
+    altdir.mkdir(parents=True, exist_ok=True)
+    (altdir / "python3").symlink_to("/usr/bin/python3.12")
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Add systemd and alternatives symlinks"], cwd=repo)
+
+    # Commit 18: Modify symlink (change target)
+    (altdir / "python3").unlink()
+    (altdir / "python3").symlink_to("/usr/bin/python3.14")
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Update python3 alternative"], cwd=repo)
+
+    # Commit 19: Delete symlink
+    (symdir / "chronyd.service").unlink()
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Disable chronyd service"], cwd=repo)
+
     return repo
 
 
@@ -314,8 +342,8 @@ def test_etckeeper_rewrite_and_verify(
     result = _run_rewrite(etckeeper_repo, sample_key_file, work_dir)
     rewritten = result.work_dir
 
-    # Then: 15 commits rewritten
-    assert result.commits_rewritten == 15
+    # Then: 19 commits rewritten
+    assert result.commits_rewritten == 19
     assert result.files_encrypted > 0
 
     # .gitattributes present in every commit of the target
@@ -340,13 +368,12 @@ def test_etckeeper_rewrite_and_verify(
     sha_src = _head_sha(etckeeper_repo)
     assert sha_src == _head_sha(etckeeper_repo)
 
-    # Encrypted files at HEAD
+    # Encrypted files at HEAD (pki/nssdb/key4.db deleted in commit 16, not present)
     encrypted_at_head = [
         "shadow",
         "gshadow",
         "machine-id",
         "ssh/ssh_host_ed25519_key",
-        "pki/nssdb/key4.db",
         "letsencrypt/accounts/acme-v02/directory/abc123/private_key.json",
         "letsencrypt/archive/example.com/privkey1.pem",
         "letsencrypt/archive/example.com/privkey2.pem",
@@ -361,14 +388,13 @@ def test_etckeeper_rewrite_and_verify(
         content = _git_show(rewritten, "HEAD", fp)
         assert content.startswith(GITCRYPT_HEADER), f"{fp} should be encrypted at HEAD"
 
-    # Non-encrypted files at HEAD
+    # Non-encrypted files at HEAD (cert9.db also deleted in commit 16)
     not_encrypted_at_head = [
         "hostname",
         "passwd",
         "ssh/ssh_host_ed25519_key.pub",
         "ssh/sshd_config",
         "pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-        "pki/nssdb/cert9.db",
         "letsencrypt/archive/example.com/cert1.pem",
         "letsencrypt/archive/example.com/cert2.pem",
         "borgmatic/config.yaml",
@@ -423,7 +449,7 @@ def test_etckeeper_source_not_mutated(
         capture_output=True,
         check=True,
     )
-    assert int(count_result.stdout.decode().strip()) == 15
+    assert int(count_result.stdout.decode().strip()) == 19
 
 
 # ---------------------------------------------------------------------------
@@ -440,14 +466,23 @@ def test_etckeeper_binary_files_handled(
     result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
     rewritten = result.work_dir
 
-    # Then: pki/nssdb/key4.db (binary, in patterns) is encrypted at HEAD
-    key4_content = _git_show(rewritten, "HEAD", "pki/nssdb/key4.db")
+    # Then: find the rewritten commit for original commit 2 (pkg install: pki)
+    # where key4.db and cert9.db were added (before deletion in commit 16).
+    rew_commits = subprocess.run(  # noqa: S603
+        [_GIT, "rev-list", "--all", "--reverse"],
+        cwd=rewritten,
+        capture_output=True,
+        check=True,
+    ).stdout.decode().strip().splitlines()
+    # 2 setup commits + 16 replayed; commit 2 (index 1 in orig) is at rew index 2+1=3
+    commit2_sha = rew_commits[3]
+
+    key4_content = _git_show(rewritten, commit2_sha, "pki/nssdb/key4.db")
     assert key4_content.startswith(GITCRYPT_HEADER), (
-        "pki/nssdb/key4.db (binary) should be encrypted"
+        "pki/nssdb/key4.db (binary) should be encrypted in commit where it was added"
     )
 
-    # pki/nssdb/cert9.db (binary, NOT in patterns) is NOT encrypted
-    cert9_content = _git_show(rewritten, "HEAD", "pki/nssdb/cert9.db")
+    cert9_content = _git_show(rewritten, commit2_sha, "pki/nssdb/cert9.db")
     assert not is_encrypted(cert9_content), (
         "pki/nssdb/cert9.db should NOT be encrypted (not in patterns)"
     )
@@ -512,3 +547,80 @@ def test_etckeeper_modified_secrets_stay_encrypted(
         assert content.startswith(GITCRYPT_HEADER), (
             f"shadow not encrypted in rewritten commit {rew_sha} (orig index {idx})"
         )
+
+
+# ---------------------------------------------------------------------------
+# test_etckeeper_binary_deletion_handled
+# ---------------------------------------------------------------------------
+
+
+def test_etckeeper_binary_deletion_handled(
+    etckeeper_repo: Path,
+    sample_key_file: Path,
+    tmp_path: Path,
+) -> None:
+    # Given: etckeeper_repo where commit 16 deletes pki/nssdb/key4.db (binary,
+    # encrypted) and pki/nssdb/cert9.db (binary, not encrypted)
+
+    # When: run rewrite -- must not raise
+    result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
+    rewritten = result.work_dir
+
+    # Then: rewrite completes with 19 commits
+    assert result.commits_rewritten == 19
+
+    # key4.db does NOT exist at HEAD (deleted in commit 16)
+    key4_at_head = _git_show(rewritten, "HEAD", "pki/nssdb/key4.db")
+    assert key4_at_head == b"", "pki/nssdb/key4.db should not exist at HEAD (deleted)"
+
+    # cert9.db does NOT exist at HEAD (deleted in commit 16)
+    cert9_at_head = _git_show(rewritten, "HEAD", "pki/nssdb/cert9.db")
+    assert cert9_at_head == b"", "pki/nssdb/cert9.db should not exist at HEAD (deleted)"
+
+    # key4.db DID exist and was encrypted in the commit where it was added
+    rew_commits = subprocess.run(  # noqa: S603
+        [_GIT, "rev-list", "--all", "--reverse"],
+        cwd=rewritten,
+        capture_output=True,
+        check=True,
+    ).stdout.decode().strip().splitlines()
+    commit2_sha = rew_commits[3]  # 2 setup + orig index 1 = index 3
+    key4_at_commit2 = _git_show(rewritten, commit2_sha, "pki/nssdb/key4.db")
+    assert key4_at_commit2.startswith(GITCRYPT_HEADER), (
+        "pki/nssdb/key4.db should be encrypted in the commit where it was added"
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_etckeeper_symlinks_handled
+# ---------------------------------------------------------------------------
+
+
+def test_etckeeper_symlinks_handled(
+    etckeeper_repo: Path,
+    sample_key_file: Path,
+    tmp_path: Path,
+) -> None:
+    # Given: etckeeper_repo with symlink add (commit 17), modify (commit 18),
+    # delete (commit 19)
+
+    # When: run rewrite -- must not raise
+    result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
+    rewritten = result.work_dir
+
+    # Then: rewrite completes with 19 commits
+    assert result.commits_rewritten == 19
+
+    # sshd.service symlink still exists at HEAD (added in commit 17, not deleted)
+    sshd_path = "systemd/system/multi-user.target.wants/sshd.service"
+    sshd = _git_show(rewritten, "HEAD", sshd_path)
+    assert sshd == b"/usr/lib/systemd/system/sshd.service"
+
+    # python3 symlink updated to python3.14 (modified in commit 18)
+    py3 = _git_show(rewritten, "HEAD", "alternatives/python3")
+    assert py3 == b"/usr/bin/python3.14"
+
+    # chronyd.service deleted in commit 19 -- must not exist at HEAD
+    chronyd_path = "systemd/system/multi-user.target.wants/chronyd.service"
+    chronyd = _git_show(rewritten, "HEAD", chronyd_path)
+    assert chronyd == b""
