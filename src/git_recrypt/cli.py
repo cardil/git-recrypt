@@ -4,23 +4,29 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from git_recrypt._cli_verify import (
+    build_verifier,
+    print_phase_progress,
+    run_post_rewrite_verify,
+)
+from git_recrypt.crypto import resolve_key_from_manifest
 from git_recrypt.detector._registry import run_detection
 from git_recrypt.detector.base import Severity
-from git_recrypt.errors import DetectionError, GitRecryptError, ManifestError
+from git_recrypt.errors import (
+    CryptoError,
+    DetectionError,
+    GitRecryptError,
+    ManifestError,
+)
 from git_recrypt.manifest import load_manifest, resolve_repo_path
-from git_recrypt.patterns import PatternMatcher
-from git_recrypt.rewriter import HistoryRewriter, RewriteConfig
-from git_recrypt.verifier import RewriteVerifier, VerifyMode
-
-if TYPE_CHECKING:
-    from git_recrypt.manifest import Manifest
+from git_recrypt.rewriter import HistoryRewriter, RewriteConfig, RewriteProgress
+from git_recrypt.verifier import VerifyMode
 
 app = typer.Typer(
     name="git-recrypt",
@@ -73,7 +79,6 @@ def init(
 
 
 def _run_wizard(repo: Path, output: Path) -> None:
-    """Invoke the optional wizard module, raising Exit if unavailable."""
     try:
         from git_recrypt import wizard as _wizard_mod  # noqa: PLC0415
     except ImportError as exc:
@@ -119,8 +124,10 @@ def run(
         _console.print(f"Work directory: {resolved_work_dir}")
 
     try:
-        key_file = _resolve_key_file(m)
-    except typer.BadParameter as exc:
+        key_file, key_msg = resolve_key_from_manifest(m.key, repo_path)
+        if key_msg:
+            _console.print(key_msg)
+    except CryptoError as exc:
         _console.print(f"[red]Key error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
@@ -132,17 +139,17 @@ def run(
     )
 
     try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=_console,
-        ) as progress:
-            task = progress.add_task("Rewriting history...", total=None)
-            rewriter = HistoryRewriter(config)
-            result = rewriter.run()
-            progress.update(task, completed=True)
+
+        def _on_progress(p: RewriteProgress) -> None:
+            _console.print(
+                f"  Replaying commit {p.commits_processed}/{p.commits_total}...",
+                end="\r",
+            )
+
+        rewriter = HistoryRewriter(config, progress_callback=_on_progress)
+        result = rewriter.run()
     except GitRecryptError as exc:
-        _console.print(f"[red]Rewrite failed:[/red] {exc}")
+        _console.print(f"\n[red]Rewrite failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
     _console.print("\n[green]Rewrite complete![/green]")
@@ -152,25 +159,14 @@ def run(
     _console.print(f"  Work directory: {result.work_dir}")
 
     if not skip_verify:
-        _console.print("\nRunning verification...")
-        matcher = PatternMatcher(
-            include_patterns=tuple(m.patterns),
-            exclude_patterns=tuple(m.exclude),
+        run_post_rewrite_verify(
+            m,
+            repo_path,
+            result.work_dir,
+            key_file,
+            rewrite_commits=result.commits_rewritten,
+            rewrite_files_encrypted=result.files_encrypted,
         )
-        verifier = RewriteVerifier(
-            original_path=repo_path,
-            rewritten_path=result.work_dir,
-            key_file=key_file,
-            matcher=matcher,
-        )
-        vresult = verifier.verify()
-        if vresult.passed:
-            _console.print("[green]Verification PASSED[/green]")
-        else:
-            _console.print("[red]Verification FAILED[/red]")
-            for err in vresult.errors:
-                _console.print(f"  [red]{err}[/red]")
-            raise typer.Exit(code=2)
 
     _console.print(f"\nTo apply: cd {result.work_dir} && git push --force --all")
 
@@ -192,19 +188,20 @@ def verify(
         _console.print(f"[red]Manifest error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    matcher = PatternMatcher(
-        include_patterns=tuple(m.patterns),
-        exclude_patterns=tuple(m.exclude),
-    )
     verify_mode = VerifyMode.FULL if mode == "full" else VerifyMode.FAST
-    verifier = RewriteVerifier(
-        original_path=Path(original),
-        rewritten_path=Path(rewritten),
-        key_file=Path(key_file),
-        matcher=matcher,
-        mode=verify_mode,
+    verifier = build_verifier(
+        m,
+        Path(original),
+        Path(rewritten),
+        Path(key_file),
+        verify_mode,
     )
+    if verifier is None:
+        _console.print("[red]Invalid manifest[/red]")
+        raise typer.Exit(code=1)
+    print_phase_progress(verifier)
     result = verifier.verify()
+    _console.print()
     _console.print(
         f"Commits verified: {result.commits_verified}/{result.commits_total}"
     )
@@ -246,15 +243,3 @@ def dry_run(
         _console.print(f"  {e}")
     _console.print(f"Introduce at: {m.introduce_at}")
     _console.print(f"Branches: {m.branches}")
-
-
-def _resolve_key_file(m: Manifest) -> Path:
-    """Resolve the key file path from manifest config."""
-    if m.key.symmetric is not None:
-        kf = m.key.symmetric.key_file
-        if kf == "generate":
-            msg = "Key generation not yet implemented. Provide an existing key file."
-            raise typer.BadParameter(msg)
-        return Path(kf)
-    msg = "GPG key mode not yet implemented."
-    raise typer.BadParameter(msg)

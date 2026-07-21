@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -94,3 +95,85 @@ def test_detect_unknown_profile(tmp_path: Path) -> None:
 
     # Then exit code is non-zero and error is reported
     assert result.exit_code != 0
+
+
+_GENERATE_KEY_MANIFEST = """\
+version: 1
+key:
+  symmetric:
+    key_file: generate
+    export_to: {export_to}
+patterns:
+  - "*.key"
+"""
+
+_GPG_USER_IDS_MANIFEST = """\
+version: 1
+key:
+  gpg:
+    user_ids:
+      - alice@example.com
+patterns:
+  - "*.key"
+"""
+
+
+def test_run_generate_symmetric_key(tmp_path: Path) -> None:
+    # Given -- manifest with key_file: generate, mocked resolve_key_from_manifest
+    export_to = tmp_path / "out.key"
+    manifest_path = tmp_path / "git-recrypt.yaml"
+    manifest_path.write_text(
+        _GENERATE_KEY_MANIFEST.format(export_to=str(export_to)), encoding="utf-8"
+    )
+    fake_key = tmp_path / "fake.key"
+    fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
+
+    fake_result = MagicMock()
+    fake_result.commits_rewritten = 0
+    fake_result.files_encrypted = 0
+    fake_result.elapsed_seconds = 0.1
+    fake_result.work_dir = tmp_path / "work"
+
+    key_patch = patch(
+        "git_recrypt.cli.resolve_key_from_manifest",
+        return_value=(fake_key, "Generated symmetric key"),
+    )
+    rewriter_patch = patch("git_recrypt.cli.HistoryRewriter")
+    with key_patch as mock_resolve, rewriter_patch as mock_rewriter:
+        mock_rewriter.return_value.run.return_value = fake_result
+        result = runner.invoke(
+            app,
+            ["run", "--manifest", str(manifest_path), "--skip-verify", "--force"],
+        )
+
+    mock_resolve.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_run_gpg_user_ids(tmp_path: Path) -> None:
+    # Given -- manifest with gpg.user_ids, mocked resolve_key_from_manifest
+    manifest_path = tmp_path / "git-recrypt.yaml"
+    manifest_path.write_text(_GPG_USER_IDS_MANIFEST, encoding="utf-8")
+    fake_key = tmp_path / "gpg-exported.key"
+    fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
+
+    fake_result = MagicMock()
+    fake_result.commits_rewritten = 0
+    fake_result.files_encrypted = 0
+    fake_result.elapsed_seconds = 0.1
+    fake_result.work_dir = tmp_path / "work"
+
+    key_patch = patch(
+        "git_recrypt.cli.resolve_key_from_manifest",
+        return_value=(fake_key, None),
+    )
+    rewriter_patch = patch("git_recrypt.cli.HistoryRewriter")
+    with key_patch as mock_resolve, rewriter_patch as mock_rewriter:
+        mock_rewriter.return_value.run.return_value = fake_result
+        result = runner.invoke(
+            app,
+            ["run", "--manifest", str(manifest_path), "--skip-verify", "--force"],
+        )
+
+    mock_resolve.assert_called_once()
+    assert result.exit_code == 0

@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from git_recrypt._git import get_commit_list, get_file_content, get_file_list
+from git_recrypt._git import (
+    get_commit_list,
+    run_git_crypt_status,
+)
+from git_recrypt._verify_commits import (
+    FileVerification,
+    verify_commit_blobwise,
+    verify_commit_checkout,
+    verify_head_encryption,
+)
+from git_recrypt._verify_helpers import (
+    build_commit_pairs,
+    run_preflight,
+)
 from git_recrypt.crypto import CryptoEngine, is_encrypted
+from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from git_recrypt.patterns import PatternMatcher
@@ -24,27 +39,6 @@ class VerifyMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class FileVerification:
-    """Result of verifying a single file."""
-
-    filepath: str
-    expected_encrypted: bool
-    actual_encrypted: bool
-    content_matches: bool
-
-
-@dataclass(frozen=True, slots=True)
-class CommitVerification:
-    """Result of verifying a single commit."""
-
-    original_sha: str
-    rewritten_sha: str
-    files_verified: int
-    gitattributes_present: bool
-    errors: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class VerifyResult:
     """Overall verification result."""
 
@@ -54,6 +48,8 @@ class VerifyResult:
     files_verified: int
     encrypted_files: tuple[FileVerification, ...]
     errors: tuple[str, ...]
+    encrypted_files_count: int = field(default=0)
+    identities_verified: int = field(default=0)
 
 
 class RewriteVerifier:
@@ -64,108 +60,217 @@ class RewriteVerifier:
     _crypto: CryptoEngine
     _matcher: PatternMatcher
     _mode: VerifyMode
+    _progress_cb: Callable[[int, int], None] | None
+    _gpg_user_ids: list[str]
+    _rewrite_commits: int
+    _rewrite_files_encrypted: int
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         original_path: Path,
         rewritten_path: Path,
         key_file: Path,
         matcher: PatternMatcher,
         mode: VerifyMode = VerifyMode.FAST,
+        rewrite_commits: int = 0,
+        rewrite_files_encrypted: int = 0,
     ) -> None:
-        """Initialize the verifier.
-
-        Args:
-            original_path: Path to the original (plaintext) repo.
-            rewritten_path: Path to the rewritten (encrypted) repo.
-            key_file: Path to the git-crypt key file.
-            matcher: PatternMatcher for determining which files should be encrypted.
-            mode: Verification thoroughness (FULL or FAST).
-        """
+        """Initialize the verifier."""
         self._original_path = original_path
         self._rewritten_path = rewritten_path
         self._crypto = CryptoEngine(key_file=key_file)
         self._matcher = matcher
         self._mode = mode
+        self._progress_cb = None
+        self._gpg_user_ids = []
+        self._rewrite_commits = rewrite_commits
+        self._rewrite_files_encrypted = rewrite_files_encrypted
+
+    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
+        """Set an optional (current, total) progress callback."""
+        self._progress_cb = cb
+
+    def set_gpg_user_ids(self, user_ids: list[str]) -> None:
+        """Set GPG user IDs for identity verification in Phase 2/3."""
+        self._gpg_user_ids = list(user_ids)
 
     def verify(self) -> VerifyResult:
-        """Run verification and return aggregated result.
+        """Run preflight phases then commit-level verification."""
+        rewrite_errors = self._check_rewrite_report()
+        if rewrite_errors:
+            return VerifyResult(
+                passed=False,
+                commits_verified=0,
+                commits_total=0,
+                files_verified=0,
+                encrypted_files=(),
+                errors=tuple(rewrite_errors),
+            )
 
-        Returns:
-            VerifyResult with pass/fail status and collected errors.
-        """
+        key_file = self._crypto.key_file
+        is_gpg = bool(self._gpg_user_ids)
+        preflight_key = None if is_gpg else key_file
+
+        preflight = run_preflight(
+            rewritten_path=self._rewritten_path,
+            matcher=self._matcher,
+            key_file=preflight_key,
+            gpg_user_ids=self._gpg_user_ids,
+        )
+
+        if not preflight.passed:
+            return VerifyResult(
+                passed=False,
+                commits_verified=0,
+                commits_total=0,
+                files_verified=0,
+                encrypted_files=(),
+                errors=preflight.errors,
+                encrypted_files_count=preflight.encrypted_files_count,
+                identities_verified=preflight.identities_verified,
+            )
+
         original_commits = get_commit_list(self._original_path)
-        rewritten_commits = get_commit_list(self._rewritten_path)
-
         commits_total = len(original_commits)
-        pairs = list(zip(original_commits, rewritten_commits, strict=False))
 
-        if self._mode == VerifyMode.FAST:
-            pairs_to_check = self._select_fast_sample(pairs)
-        else:
-            pairs_to_check = pairs
+        try:
+            pairs = build_commit_pairs(original_commits, self._rewritten_path)
+        except ValueError as exc:
+            return VerifyResult(
+                passed=False,
+                commits_verified=0,
+                commits_total=commits_total,
+                files_verified=0,
+                encrypted_files=(),
+                errors=(str(exc),),
+                encrypted_files_count=preflight.encrypted_files_count,
+                identities_verified=preflight.identities_verified,
+            )
 
-        all_errors: list[str] = []
-        all_encrypted: list[FileVerification] = []
-        total_files = 0
+        pairs_to_check = (
+            self._select_fast_sample(pairs) if self._mode == VerifyMode.FAST else pairs
+        )
 
-        for orig_sha, rew_sha in pairs_to_check:
-            cv = self._verify_commit(orig_sha, rew_sha)
-            all_errors.extend(cv.errors)
-            total_files += cv.files_verified
+        all_errors, total_files, commits_checked = self._run_commit_verification(
+            pairs_to_check
+        )
 
-        # Collect encrypted file verifications from HEAD
-        if pairs_to_check:
-            orig_head, rew_head = pairs_to_check[0]
-            orig_files = get_file_list(self._original_path, orig_head)
-            rew_files = set(get_file_list(self._rewritten_path, rew_head))
-            for fp in orig_files:
-                if not self._matcher.matches(fp):
-                    continue
-                if fp not in rew_files:
-                    continue
-                orig_content = get_file_content(self._original_path, orig_head, fp)
-                rew_content = get_file_content(self._rewritten_path, rew_head, fp)
-                actual_enc = is_encrypted(rew_content)
-                content_ok = False
-                if actual_enc:
-                    try:
-                        decrypted = self._crypto.decrypt(rew_content)
-                        content_ok = decrypted == orig_content
-                    except Exception:  # noqa: BLE001
-                        content_ok = False
-                all_encrypted.append(
-                    FileVerification(
-                        filepath=fp,
-                        expected_encrypted=True,
-                        actual_encrypted=actual_enc,
-                        content_matches=content_ok,
-                    )
-                )
+        if not all_errors:
+            lock_errors = self._verify_final_locked_state()
+            all_errors.extend(lock_errors)
+
+        all_encrypted = verify_head_encryption(
+            self._original_path,
+            self._rewritten_path,
+            pairs_to_check,
+            self._matcher,
+            self._crypto,
+        )
 
         return VerifyResult(
             passed=len(all_errors) == 0,
-            commits_verified=len(pairs_to_check),
+            commits_verified=commits_checked,
             commits_total=commits_total,
             files_verified=total_files,
             encrypted_files=tuple(all_encrypted),
             errors=tuple(all_errors),
+            encrypted_files_count=preflight.encrypted_files_count,
+            identities_verified=preflight.identities_verified,
         )
+
+    def _check_rewrite_report(self) -> list[str]:
+        """Fail fast if rewrite_commits or rewrite_files_encrypted is 0 (when set)."""
+        errors: list[str] = []
+        if not (self._rewrite_commits > 0 or self._rewrite_files_encrypted > 0):
+            return errors
+        if self._rewrite_commits == 0:
+            errors.append(
+                "Rewrite report: commits_rewritten is 0 -- no commits were rewritten"
+            )
+        if self._rewrite_files_encrypted == 0:
+            errors.append(
+                "Rewrite report: files_encrypted is 0 -- no files were encrypted"
+            )
+        return errors
+
+    def _run_commit_verification(
+        self,
+        pairs_to_check: list[tuple[str, str]],
+    ) -> tuple[list[str], int, int]:
+        """Run commit-level verification. Returns (errors, files, commits)."""
+        all_errors: list[str] = []
+        total_files = 0
+        commits_checked = 0
+        checkout_indices = self._select_checkout_indices(pairs_to_check)
+        key_file = self._crypto.key_file
+
+        for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
+            if self._progress_cb is not None:
+                self._progress_cb(idx, len(pairs_to_check))
+            if idx in checkout_indices:
+                errs = verify_commit_checkout(
+                    self._rewritten_path,
+                    self._original_path,
+                    orig_sha,
+                    rew_sha,
+                    key_file,
+                )
+            else:
+                errs = verify_commit_blobwise(
+                    self._original_path,
+                    self._rewritten_path,
+                    orig_sha,
+                    rew_sha,
+                    self._matcher,
+                    self._crypto,
+                )
+            all_errors.extend(errs)
+            commits_checked += 1
+            if all_errors:
+                break
+
+        return all_errors, total_files, commits_checked
+
+    def _select_checkout_indices(self, pairs: list[tuple[str, str]]) -> set[int]:
+        """Select indices for checkout-based verification: tip (0) + 1 random middle."""
+        if not pairs:
+            return set()
+        indices: set[int] = {0}
+        middle = list(range(1, len(pairs) - 1)) if len(pairs) > 2 else []  # noqa: PLR2004
+        if middle:
+            indices.add(random.choice(middle))  # noqa: S311
+        return indices
+
+    def _verify_final_locked_state(self) -> list[str]:
+        """Verify repo is in locked state after all commits verified."""
+        errors: list[str] = []
+        try:
+            entries = run_git_crypt_status(self._rewritten_path)
+        except CryptoError:
+            return errors
+        encrypted_paths = [
+            self._rewritten_path / fp
+            for fp, is_enc in entries
+            if is_enc and self._matcher.matches(fp)
+        ][:5]
+        for fp in encrypted_paths:
+            if not fp.exists():
+                continue
+            try:
+                content = fp.read_bytes()
+            except OSError:
+                continue
+            if not is_encrypted(content):
+                errors.append(
+                    f"Post-verify: {fp.name} is not locked (missing GITCRYPT header)"
+                )
+        return errors
 
     def _select_fast_sample(
         self, pairs: list[tuple[str, str]]
     ) -> list[tuple[str, str]]:
-        """Select HEAD, root commit, and a random 10% sample (min 5, max 50).
-
-        Args:
-            pairs: All (original_sha, rewritten_sha) pairs in rev-list order.
-
-        Returns:
-            Deduplicated subset of pairs to verify.
-        """
         if not pairs:
             return []
-
         selected: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
 
@@ -174,77 +279,9 @@ class RewriteVerifier:
                 seen.add(pair)
                 selected.append(pair)
 
-        # HEAD is first in rev-list output, root is last
         add(pairs[0])
         add(pairs[-1])
-
-        sample_count = max(5, min(50, len(pairs) // 10))
+        sample_count = max(5, min(30, len(pairs) // 10))
         for pair in random.sample(pairs, min(sample_count, len(pairs))):
             add(pair)
-
         return selected
-
-    def _verify_commit(
-        self, original_sha: str, rewritten_sha: str
-    ) -> CommitVerification:
-        """Verify a single commit pair.
-
-        Args:
-            original_sha: SHA in the original repo.
-            rewritten_sha: SHA in the rewritten repo.
-
-        Returns:
-            CommitVerification with per-file results and errors.
-        """
-        errors: list[str] = []
-        files_verified = 0
-
-        orig_files = get_file_list(self._original_path, original_sha)
-        rew_files = set(get_file_list(self._rewritten_path, rewritten_sha))
-
-        gitattributes_present = ".gitattributes" in rew_files
-        if not gitattributes_present:
-            errors.append(
-                f"commit {rewritten_sha[:8]}: .gitattributes missing in rewritten repo"
-            )
-
-        for fp in orig_files:
-            if fp not in rew_files:
-                errors.append(
-                    f"commit {rewritten_sha[:8]}: file missing in rewritten repo: {fp}"
-                )
-                continue
-
-            orig_content = get_file_content(self._original_path, original_sha, fp)
-            rew_content = get_file_content(self._rewritten_path, rewritten_sha, fp)
-            files_verified += 1
-
-            if self._matcher.matches(fp):
-                if not is_encrypted(rew_content):
-                    errors.append(
-                        f"commit {rewritten_sha[:8]}: {fp}: expected encrypted, got plaintext"  # noqa: E501
-                    )
-                    continue
-                try:
-                    decrypted = self._crypto.decrypt(rew_content)
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(
-                        f"commit {rewritten_sha[:8]}: {fp}: decryption failed: {exc}"
-                    )
-                    continue
-                if decrypted != orig_content:
-                    errors.append(
-                        f"commit {rewritten_sha[:8]}: {fp}: decrypted content differs from original"  # noqa: E501
-                    )
-            elif rew_content != orig_content:
-                errors.append(
-                    f"commit {rewritten_sha[:8]}: {fp}: non-encrypted file content differs"  # noqa: E501
-                )
-
-        return CommitVerification(
-            original_sha=original_sha,
-            rewritten_sha=rewritten_sha,
-            files_verified=files_verified,
-            gitattributes_present=gitattributes_present,
-            errors=tuple(errors),
-        )

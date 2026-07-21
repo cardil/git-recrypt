@@ -150,10 +150,8 @@ def test_encrypt_idempotent(
         repo_path=work_dir,
         work_dir=tmp_path / "work2",
     )
-    result2 = HistoryRewriter(config).run()
-    second_env = _git_show(".env", result2.work_dir)
-    assert second_env.stdout.startswith(_GITCRYPT_HEADER)
-    assert not second_env.stdout[10:].startswith(_GITCRYPT_HEADER)
+    with pytest.raises(RewriteError, match="encrypted files"):
+        HistoryRewriter(config).run()
 
 
 def test_rewrite_result_has_counts(
@@ -181,7 +179,7 @@ def test_invalid_repo_path_raises(sample_key_file: Path, tmp_path: Path) -> None
         repo_path=tmp_path / "nonexistent",
         work_dir=tmp_path / "work",
     )
-    with pytest.raises(RewriteError, match="clone"):
+    with pytest.raises(RewriteError, match="Source repo not found"):
         _ = HistoryRewriter(config).run()
 
 

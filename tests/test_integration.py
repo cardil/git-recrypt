@@ -246,10 +246,14 @@ def test_empty_file_encryption(sample_key_file: Path, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_already_encrypted_idempotent(
+def test_already_encrypted_rejected(
     tmp_git_repo: Path, sample_key_file: Path, tmp_path: Path
 ) -> None:
     # Given: a rewritten repo (first pass)
+    import pytest  # noqa: PLC0415
+
+    from git_recrypt.errors import RewriteError  # noqa: PLC0415
+
     manifest = _create_manifest(
         key_file=sample_key_file,
         patterns=[".env", "secrets/**"],
@@ -262,24 +266,15 @@ def test_already_encrypted_idempotent(
     )
     first_rewritten = first_result.work_dir
 
-    # When: run rewrite AGAIN on the already-rewritten repo
-    second_result = _run_rewrite(
-        repo_path=first_rewritten,
-        key_file=sample_key_file,
-        work_dir=tmp_path / "work2",
+    # When/Then: running rewrite on already-encrypted source is rejected
+    config = RewriteConfig(
         manifest=manifest,
+        key_file=sample_key_file,
+        repo_path=first_rewritten,
+        work_dir=tmp_path / "work2",
     )
-    second_rewritten = second_result.work_dir
-
-    # Then: files are not double-encrypted
-    env_content = _git_show(second_rewritten, "HEAD", ".env")
-    assert env_content.startswith(GITCRYPT_HEADER)
-    # Content after header does NOT start with another GITCRYPT header
-    assert not env_content[len(GITCRYPT_HEADER) :].startswith(GITCRYPT_HEADER)
-
-    key_content = _git_show(second_rewritten, "HEAD", "secrets/api.key")
-    assert key_content.startswith(GITCRYPT_HEADER)
-    assert not key_content[len(GITCRYPT_HEADER) :].startswith(GITCRYPT_HEADER)
+    with pytest.raises(RewriteError, match="encrypted files"):
+        HistoryRewriter(config).run()
 
 
 # ---------------------------------------------------------------------------

@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from git_recrypt.crypto import GITCRYPT_HEADER, CryptoEngine, is_encrypted
+from git_recrypt.crypto import (
+    GITCRYPT_HEADER,
+    CryptoEngine,
+    generate_symmetric_key,
+    is_encrypted,
+)
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
@@ -134,3 +140,61 @@ def test_verify_roundtrip_returns_true(sample_key_file: Path) -> None:
     result = engine.verify_roundtrip(plaintext)
     # Then
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# generate_symmetric_key
+# ---------------------------------------------------------------------------
+
+
+def test_generate_symmetric_key_creates_file(tmp_path: Path) -> None:
+    # Given
+    export_to = tmp_path / "generated.key"
+    # When
+    result = generate_symmetric_key(export_to)
+    # Then
+    assert result == export_to
+    assert export_to.exists()
+    assert export_to.stat().st_size > 0
+    assert export_to.read_bytes()[:13] == b"\x00GITCRYPTKEY\x00"
+
+
+def test_generate_symmetric_key_invalid_path(tmp_path: Path) -> None:
+    # Given -- a path whose parent directory does not exist
+    export_to = tmp_path / "nonexistent_dir" / "key.key"
+    # When / Then
+    with pytest.raises(CryptoError):
+        generate_symmetric_key(export_to)
+
+
+def test_generate_symmetric_key_returns_path(tmp_path: Path) -> None:
+    # Given
+    export_to = tmp_path / "sym.key"
+    # When
+    returned = generate_symmetric_key(export_to)
+    # Then -- returned path is the same object as export_to
+    assert returned == export_to
+
+
+def test_generate_symmetric_key_no_git_crypt(tmp_path: Path) -> None:
+    # Given -- git-crypt binary is not found
+    export_to = tmp_path / "key.key"
+    with (
+        patch("git_recrypt.crypto.shutil.which", return_value=None),
+        pytest.raises(CryptoError, match="git-crypt binary not found"),
+    ):
+        generate_symmetric_key(export_to)
+
+
+def test_generate_symmetric_key_command_fails(tmp_path: Path) -> None:
+    # Given -- git-crypt keygen exits non-zero
+    export_to = tmp_path / "key.key"
+    failed = MagicMock()
+    failed.returncode = 1
+    failed.stderr = b"some error"
+    with (
+        patch("git_recrypt.crypto.shutil.which", return_value="/usr/bin/git-crypt"),
+        patch("git_recrypt.crypto.subprocess.run", return_value=failed),
+        pytest.raises(CryptoError),
+    ):
+        generate_symmetric_key(export_to)
