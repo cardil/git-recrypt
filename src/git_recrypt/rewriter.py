@@ -196,6 +196,9 @@ class HistoryRewriter:
         *,
         is_root: bool,
     ) -> None:
+        if len(meta.parents) > 1:
+            self._replay_merge_commit(tgt, meta)
+            return
         fmt = ["format-patch", "--stdout", "--binary"]
         if is_root:
             fmt += ["--root", sha]
@@ -208,6 +211,24 @@ class HistoryRewriter:
         _apply_patch_and_binaries(src, tgt, sha, patch)
         _ = _run(["add", "-A"], tgt)
         _commit_with_meta(tgt, meta)
+
+    def _replay_merge_commit(self, tgt: Path, meta: CommitInfo) -> None:
+        mapped_parents = [self._sha_map[p] for p in meta.parents]
+        _ = _run(["checkout", mapped_parents[0]], tgt)
+        merge_cmd = ["merge", "--no-commit", "--no-ff", mapped_parents[1]]
+        r = subprocess.run(  # noqa: S603
+            [_GIT, *merge_cmd], cwd=tgt, capture_output=True, check=False
+        )
+        if r.returncode not in {0, 1}:
+            raw: bytes = r.stderr or b""
+            raise RewriteError(
+                phase="merge",
+                detail=f"git merge failed: {raw.decode(errors='replace')}",
+            )
+        _ = _run(["add", "-A"], tgt)
+        _commit_with_meta(tgt, meta)
+        _ = _run(["checkout", "master"], tgt)
+        _ = _run(["merge", "--ff-only", "HEAD@{1}"], tgt)
 
     def _save_state(self, _last_sha: str) -> None:
         """Phase 3: persist commit map, setup commits, and config."""

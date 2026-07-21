@@ -159,7 +159,7 @@ _UPSMON_CONF = (
 
 @pytest.fixture
 def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
-    """Build a plausible etckeeper-like repo with 19 commits."""
+    """Build a plausible etckeeper-like repo with 22 commits (includes a merge)."""
     repo = tmp_path / "etckeeper"
     repo.mkdir()
 
@@ -257,7 +257,30 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     _write(repo / "hostname", "baldur.example.com")
     _commit(repo, "hostname: set fqdn")
 
-    # Commit 11: Add UPS config
+    # Commits 11-13: feature branch + parallel master commit + merge
+    # Feature branch: update nginx SSL key (different content from commit 9)
+    _run_git(["checkout", "-b", "feature/nginx-ssl"], cwd=repo)
+    _write(
+        repo / "pki" / "nginx" / "private" / "wildcard.example.com.key",
+        _FAKE_PRIVKEY.format(name="fakenginxkey-v2"),
+    )
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "feature: update nginx SSL key"], cwd=repo)
+
+    # Parallel commit on master
+    _run_git(["checkout", "master"], cwd=repo)
+    _write(repo / "nginx" / "nginx.conf", "worker_processes auto;\n")
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Add nginx config"], cwd=repo)
+
+    # Merge feature branch (creates a merge commit)
+    _run_git(
+        ["merge", "feature/nginx-ssl", "--no-edit", "-m", "Merge feature/nginx-ssl"],
+        cwd=repo,
+    )
+    _run_git(["branch", "-d", "feature/nginx-ssl"], cwd=repo)
+
+    # Commit 14 (was 11): Add UPS config
     _write(
         repo / "ups" / "upsd.users",
         "[admin]\n  password = upspassword\n  actions = SET\n  instcmds = ALL\n",
@@ -342,8 +365,8 @@ def test_etckeeper_rewrite_and_verify(
     result = _run_rewrite(etckeeper_repo, sample_key_file, work_dir)
     rewritten = result.work_dir
 
-    # Then: 19 commits rewritten
-    assert result.commits_rewritten == 19
+    # Then: 22 commits rewritten
+    assert result.commits_rewritten == 22
     assert result.files_encrypted > 0
 
     # .gitattributes present in every commit of the target
@@ -449,7 +472,7 @@ def test_etckeeper_source_not_mutated(
         capture_output=True,
         check=True,
     )
-    assert int(count_result.stdout.decode().strip()) == 19
+    assert int(count_result.stdout.decode().strip()) == 22
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +589,8 @@ def test_etckeeper_binary_deletion_handled(
     result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
     rewritten = result.work_dir
 
-    # Then: rewrite completes with 19 commits
-    assert result.commits_rewritten == 19
+    # Then: rewrite completes with 22 commits
+    assert result.commits_rewritten == 22
 
     # key4.db does NOT exist at HEAD (deleted in commit 16)
     key4_at_head = _git_show(rewritten, "HEAD", "pki/nssdb/key4.db")
@@ -608,8 +631,8 @@ def test_etckeeper_symlinks_handled(
     result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
     rewritten = result.work_dir
 
-    # Then: rewrite completes with 19 commits
-    assert result.commits_rewritten == 19
+    # Then: rewrite completes with 22 commits
+    assert result.commits_rewritten == 22
 
     # sshd.service symlink still exists at HEAD (added in commit 17, not deleted)
     sshd_path = "systemd/system/multi-user.target.wants/sshd.service"
@@ -624,3 +647,45 @@ def test_etckeeper_symlinks_handled(
     chronyd_path = "systemd/system/multi-user.target.wants/chronyd.service"
     chronyd = _git_show(rewritten, "HEAD", chronyd_path)
     assert chronyd == b""
+
+
+# ---------------------------------------------------------------------------
+# test_etckeeper_merge_commits_preserved
+# ---------------------------------------------------------------------------
+
+
+def test_etckeeper_merge_commits_preserved(
+    etckeeper_repo: Path, sample_key_file: Path, tmp_path: Path
+) -> None:
+    # Given: etckeeper_repo with a merge commit (feature/nginx-ssl merged into master)
+
+    # When: run rewrite
+    result = _run_rewrite(etckeeper_repo, sample_key_file, tmp_path / "work")
+    rewritten = result.work_dir
+
+    # Then: at least one merge commit exists in the rewritten repo
+    merge_output = subprocess.run(  # noqa: S603
+        [_GIT, "rev-list", "--merges", "--all"],
+        cwd=rewritten,
+        capture_output=True,
+        check=True,
+    ).stdout.decode().strip()
+    merge_commits = merge_output.splitlines() if merge_output else []
+    assert len(merge_commits) >= 1, "Expected at least one merge commit"
+
+    # Each merge commit must have exactly 2 parents (3 tokens: commit + 2 parents)
+    for mc in merge_commits:
+        parents_line = subprocess.run(  # noqa: S603
+            [_GIT, "rev-list", "--parents", "-1", mc],
+            cwd=rewritten,
+            capture_output=True,
+            check=True,
+        ).stdout.decode().strip().split()
+        assert len(parents_line) >= 3, f"Merge commit {mc} should have 2+ parents"
+
+    # The nginx key must be encrypted at HEAD (merged from feature branch)
+    nginx_key_path = "pki/nginx/private/wildcard.example.com.key"
+    nginx_key = _git_show(rewritten, "HEAD", nginx_key_path)
+    assert nginx_key.startswith(GITCRYPT_HEADER), (
+        f"{nginx_key_path} should be encrypted at HEAD"
+    )
