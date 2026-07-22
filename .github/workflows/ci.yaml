@@ -15,9 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install git-crypt
+        run: sudo apt-get update && sudo apt-get install -y git-crypt
+
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -26,7 +30,13 @@ jobs:
         run: uv run ruff check src/ tests/
 
       - name: Type check (basedpyright)
-        run: uv run basedpyright src/ tests/
+        run: |
+          output=$(uv run basedpyright src/ tests/ 2>&1) || true
+          echo "$output"
+          if echo "$output" | grep -qE '^[1-9][0-9]* errors?'; then
+            echo "::error::basedpyright found errors"
+            exit 1
+          fi
 
       - name: Test (pytest)
         run: uv run pytest tests/ -q --no-header

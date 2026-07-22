@@ -140,7 +140,7 @@ def test_run_generate_symmetric_key(tmp_path: Path) -> None:
     )
     rewriter_patch = patch("git_recrypt.cli.HistoryRewriter")
     with key_patch as mock_resolve, rewriter_patch as mock_rewriter:
-        mock_rewriter.return_value.run.return_value = fake_result
+        mock_rewriter.return_value.run.return_value = fake_result  # pyright: ignore[reportAny]
         result = runner.invoke(
             app,
             ["run", "--manifest", str(manifest_path), "--skip-verify", "--force"],
@@ -169,7 +169,7 @@ def test_run_gpg_user_ids(tmp_path: Path) -> None:
     )
     rewriter_patch = patch("git_recrypt.cli.HistoryRewriter")
     with key_patch as mock_resolve, rewriter_patch as mock_rewriter:
-        mock_rewriter.return_value.run.return_value = fake_result
+        mock_rewriter.return_value.run.return_value = fake_result  # pyright: ignore[reportAny]
         result = runner.invoke(
             app,
             ["run", "--manifest", str(manifest_path), "--skip-verify", "--force"],

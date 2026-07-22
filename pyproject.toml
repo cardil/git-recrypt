@@ -36,6 +36,7 @@ reportUnnecessaryTypeIgnoreComment = "error"
 reportUnusedVariable = "error"
 reportMissingParameterType = "error"
 reportPrivateUsage = "error"
+reportImplicitStringConcatenation = false
 
 [tool.ruff]
 target-version = "py312"

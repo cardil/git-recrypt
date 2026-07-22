@@ -27,7 +27,7 @@ def test_detected_secret_frozen() -> None:
         suggested_pattern="etc/shadow",
     )
     with pytest.raises(AttributeError):
-        secret.filepath = "/etc/passwd"  # type: ignore[misc]
+        secret.filepath = "/etc/passwd"  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_detected_secret_hashable() -> None:
@@ -56,12 +56,12 @@ def test_detection_result_frozen() -> None:
         suggested_excludes=(),
     )
     with pytest.raises(AttributeError):
-        result.profile = "etckeeper"  # type: ignore[misc]
+        result.profile = "etckeeper"  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_base_detector_not_instantiable() -> None:
     with pytest.raises(TypeError):
-        BaseDetector()  # type: ignore[abstract]
+        BaseDetector()  # type: ignore[abstract]  # pyright: ignore[reportAbstractUsage]
 
 
 def test_detection_result_creation() -> None:
