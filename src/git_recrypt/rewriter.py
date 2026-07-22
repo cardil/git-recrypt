@@ -12,16 +12,8 @@ from typing import TYPE_CHECKING, Final
 
 from git_recrypt._replay import (
     CommitInfo,
-    CommitMeta,
-    TreeEntry,
-    git_commit_tree,
-    git_hash_object,
     git_init,
-    git_mktree,
-    git_update_ref,
     list_commits_topo,
-    make_empty_tree,
-    now_git_date,
     read_commit_meta,
     run_git_crypt,
 )
@@ -44,6 +36,10 @@ if TYPE_CHECKING:
     from git_recrypt.manifest import Manifest
 
 _GIT: Final = "/usr/bin/git"
+
+
+def _git_config(repo: Path, key: str, value: str) -> None:
+    _ = _run(["config", key, value], repo)
 
 
 def _run(args: list[str], cwd: Path, *, inp: bytes | None = None) -> bytes:
@@ -109,6 +105,7 @@ class HistoryRewriter:
     def run(self) -> RewriteResult:
         """Execute the full rewrite pipeline."""
         _assert_not_encrypted(self._config.repo_path, self._config.manifest)
+        _assert_gpg_keys_available(self._config.manifest)
         start = time.monotonic()
         try:
             self._create_target()
@@ -136,12 +133,11 @@ class HistoryRewriter:
         if t.exists():
             shutil.rmtree(t)
         git_init(t)
-        bot = CommitMeta("git-recrypt", "git-recrypt@localhost", now_git_date())
-        init_sha = git_commit_tree(
-            t, make_empty_tree(t), [], "git-recrypt: initial setup", bot, bot
-        )
-        self._setup_commits.append(init_sha)
-        git_update_ref(t, "refs/heads/master", init_sha)
+        _git_config(t, "user.name", "git-recrypt")
+        _git_config(t, "user.email", "git-recrypt@localhost")
+        _git_config(t, "commit.gpgsign", "false")
+        _ = _run(["commit", "--allow-empty", "-m", "git-recrypt: initial setup"], t)
+        self._setup_commits.append(_rev_parse(t))
         m = self._config.manifest
         gpg_cfg = m.key.gpg
         if gpg_cfg is not None and gpg_cfg.user_ids is not None:
@@ -150,21 +146,18 @@ class HistoryRewriter:
             init_gpg_repo(t, gpg_cfg.user_ids)
         else:
             run_git_crypt(t, ["init"])
-        keys_dir = t / ".git" / "git-crypt" / "keys"
-        keys_dir.mkdir(parents=True, exist_ok=True)
-        _ = shutil.copy2(self._config.key_file, keys_dir / "default")
-        ga_sha = git_hash_object(t, generate_gitattributes(m.patterns).encode())
-        tree_sha = git_mktree(
-            t, [TreeEntry("100644", "blob", ga_sha, ".gitattributes")]
-        )
-        ga_commit = git_commit_tree(
-            t, tree_sha, [init_sha], "git-recrypt: add .gitattributes", bot, bot
-        )
-        self._setup_commits.append(ga_commit)
-        git_update_ref(t, "refs/heads/master", ga_commit)
-        _ = _run(["reset", "--hard", "HEAD"], t)
-        # Unlock so smudge/clean filters work transparently during replay.
-        run_git_crypt(t, ["unlock", str(self._config.key_file)])
+            keys_dir = t / ".git" / "git-crypt" / "keys"
+            keys_dir.mkdir(parents=True, exist_ok=True)
+            _ = shutil.copy2(self._config.key_file, keys_dir / "default")
+        ga_content = generate_gitattributes(m.patterns)
+        _ = (t / ".gitattributes").write_text(ga_content, encoding="utf-8")
+        _ = _run(["add", ".gitattributes"], t)
+        _ = _run(["commit", "-m", "git-recrypt: add .gitattributes"], t)
+        self._setup_commits.append(_rev_parse(t))
+        if gpg_cfg is not None and gpg_cfg.user_ids is not None:
+            run_git_crypt(t, ["unlock"])
+        else:
+            run_git_crypt(t, ["unlock", str(self._config.key_file)])
 
     def _replay_commits(self) -> str:
         """Phase 2: apply patches. git-crypt clean filter encrypts on add."""
@@ -326,6 +319,29 @@ def _commit_with_meta(tgt: Path, meta: CommitInfo) -> None:
         raw: bytes = r.stderr or b""
         stderr = raw.decode(errors="replace")
         raise RewriteError(phase="commit", detail=f"git commit failed: {stderr}")
+
+
+def _assert_gpg_keys_available(manifest: Manifest) -> None:
+    gpg_cfg = manifest.key.gpg
+    if gpg_cfg is None or gpg_cfg.user_ids is None:
+        return
+    _GPG = "/usr/bin/gpg"  # noqa: N806
+    for uid in gpg_cfg.user_ids:
+        r = subprocess.run(  # noqa: S603
+            [_GPG, "--list-secret-keys", "--with-colons", uid],
+            capture_output=True, check=False,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return
+    uids = ", ".join(gpg_cfg.user_ids)
+    raise RewriteError(
+        phase="pre-check",
+        detail=(
+            f"No GPG secret key available for any configured user ID ({uids})."
+            " Verification requires git-crypt unlock via GPG."
+            " Import the secret key or use symmetric mode."
+        ),
+    )
 
 
 def _assert_not_encrypted(repo: Path, manifest: Manifest) -> None:

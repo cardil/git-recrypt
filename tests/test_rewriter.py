@@ -214,3 +214,28 @@ def test_git_init_creates_master_branch(tmp_path: Path) -> None:
         cwd=repo, capture_output=True, check=True,
     ).stdout.decode().strip()
     assert head_ref == "refs/heads/master"
+
+
+def test_gpg_mode_fails_when_no_secret_key_available(
+    tmp_git_repo: Path, sample_key_file: Path, tmp_path: Path,
+) -> None:
+    # Given: GPG manifest with a user ID that has no secret key
+    from git_recrypt.manifest import GpgKeyConfig  # noqa: PLC0415
+
+    manifest = Manifest(
+        version=1,
+        key=KeyConfig(gpg=GpgKeyConfig(user_ids=["nonexistent@example.com"])),
+        patterns=["*.secret"],
+        exclude=[],
+        introduce_at="root",
+    )
+    config = RewriteConfig(
+        manifest=manifest,
+        key_file=sample_key_file,
+        repo_path=tmp_git_repo,
+        work_dir=tmp_path / "work",
+    )
+
+    # When/Then: run() raises RewriteError about missing GPG secret key
+    with pytest.raises(RewriteError, match="(?i)gpg.*secret"):
+        HistoryRewriter(config).run()
