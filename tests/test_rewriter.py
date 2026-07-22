@@ -197,3 +197,20 @@ def test_patterns_that_match_nothing_still_injects_gitattributes(
 
     ga = _git_show(".gitattributes", work_dir)
     assert ga.returncode == 0
+
+
+def test_git_init_creates_master_branch(tmp_path: Path) -> None:
+    # Given: a fresh directory
+    from git_recrypt._replay import git_init  # noqa: PLC0415
+
+    repo = tmp_path / "init-test"
+
+    # When: git_init creates the repo
+    git_init(repo)
+
+    # Then: HEAD points to refs/heads/master
+    head_ref = subprocess.run(  # noqa: S603
+        [_GIT, "symbolic-ref", "HEAD"],
+        cwd=repo, capture_output=True, check=True,
+    ).stdout.decode().strip()
+    assert head_ref == "refs/heads/master"

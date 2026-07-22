@@ -55,7 +55,7 @@ def _exc_stderr(exc: subprocess.CalledProcessError) -> str:
 def git_init(path: Path) -> None:
     try:
         _ = subprocess.run(  # noqa: S603
-            [_GIT, "init", str(path)],
+            [_GIT, "init", "-b", "master", str(path)],
             check=True,
             capture_output=True,
         )
