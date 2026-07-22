@@ -237,5 +237,5 @@ def test_gpg_mode_fails_when_no_secret_key_available(
     )
 
     # When/Then: run() raises RewriteError about missing GPG secret key
-    with pytest.raises(RewriteError, match="(?i)gpg.*secret"):
+    with pytest.raises(RewriteError, match=r"(?i)gpg.*secret"):
         HistoryRewriter(config).run()

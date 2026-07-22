@@ -11,7 +11,6 @@ dependencies = [
     "questionary>=2",
     "pathspec>=0.12",
     "pydantic>=2.10",
-    "git-filter-repo>=2.38",
 ]
 
 [project.scripts]
