@@ -141,6 +141,9 @@ def run(
     try:
 
         def _on_progress(p: RewriteProgress) -> None:
+            if p.message is not None:
+                _console.print(f"  {p.message}")
+                return
             _console.print(
                 f"  Replaying commit {p.commits_processed}/{p.commits_total}...",
                 end="\r",

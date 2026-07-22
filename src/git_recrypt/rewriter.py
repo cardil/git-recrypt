@@ -74,6 +74,7 @@ class RewriteProgress:
     commits_processed: int
     commits_total: int
     files_encrypted: int
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,11 +128,19 @@ class HistoryRewriter:
             setup_commits=tuple(self._setup_commits),
         )
 
+    def _emit(self, msg: str) -> None:
+        if self._progress_cb is not None:
+            self._progress_cb(RewriteProgress(
+                phase="init", commits_processed=0, commits_total=0,
+                files_encrypted=0, message=msg,
+            ))
+
     def _create_target(self) -> None:
         """Phase 1: create target repo with git-crypt setup, then unlock."""
         t = self._config.work_dir
         if t.exists():
             shutil.rmtree(t)
+        self._emit(f"Initializing target repo: {t}")
         git_init(t)
         _git_config(t, "user.name", "git-recrypt")
         _git_config(t, "user.email", "git-recrypt@localhost")
@@ -143,21 +152,32 @@ class HistoryRewriter:
         if gpg_cfg is not None and gpg_cfg.user_ids is not None:
             from git_recrypt.crypto import init_gpg_repo  # noqa: PLC0415
 
+            self._emit("Initializing git-crypt (GPG mode)")
             init_gpg_repo(t, gpg_cfg.user_ids)
+            for uid in gpg_cfg.user_ids:
+                self._emit(f"  Added GPG collaborator: {uid}")
         else:
+            self._emit("Initializing git-crypt (symmetric mode)")
             run_git_crypt(t, ["init"])
             keys_dir = t / ".git" / "git-crypt" / "keys"
             keys_dir.mkdir(parents=True, exist_ok=True)
             _ = shutil.copy2(self._config.key_file, keys_dir / "default")
+        is_gpg = gpg_cfg is not None and gpg_cfg.user_ids is not None
+        self._emit(f"Committing .gitattributes ({len(m.patterns)} patterns)")
         ga_content = generate_gitattributes(m.patterns)
         _ = (t / ".gitattributes").write_text(ga_content, encoding="utf-8")
         _ = _run(["add", ".gitattributes"], t)
         _ = _run(["commit", "-m", "git-recrypt: add .gitattributes"], t)
         self._setup_commits.append(_rev_parse(t))
-        if gpg_cfg is not None and gpg_cfg.user_ids is not None:
+        if is_gpg:
+            self._emit("Unlocking target repo (GPG)")
             run_git_crypt(t, ["unlock"])
         else:
+            self._emit("Unlocking target repo (symmetric key)")
             run_git_crypt(t, ["unlock", str(self._config.key_file)])
+        self._emit("Pre-flight: testing lock/unlock roundtrip")
+        _preflight_lock_unlock(t, self._config.key_file, is_gpg)
+        self._emit("Target repo ready")
 
     def _replay_commits(self) -> str:
         """Phase 2: apply patches. git-crypt clean filter encrypts on add."""
@@ -257,6 +277,20 @@ def _dump_debug_patch(src: Path, sha: str, patch: bytes) -> None:
     dbg = debug_dir_for_repo(src)
     dbg.mkdir(parents=True, exist_ok=True)
     _ = (dbg / f"{sha}.patch").write_bytes(patch)
+
+
+def _preflight_lock_unlock(tgt: Path, key_file: Path, is_gpg: bool) -> None:
+    run_git_crypt(tgt, ["lock"])
+    try:
+        if is_gpg:
+            run_git_crypt(tgt, ["unlock"])
+        else:
+            run_git_crypt(tgt, ["unlock", str(key_file)])
+    except RewriteError as exc:
+        raise RewriteError(
+            phase="pre-flight",
+            detail=f"lock/unlock roundtrip failed: {exc.detail}",
+        ) from exc
 
 
 def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:
