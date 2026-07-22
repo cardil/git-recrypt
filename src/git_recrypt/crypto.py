@@ -268,8 +268,7 @@ def resolve_key_from_manifest(
         user_ids = [user_id]
         msg = f"Generated GPG key: {user_id}"
     elif gpg_cfg.user_ids is not None:
-        user_ids = gpg_cfg.user_ids
-        msg = None
+        return Path("/dev/null"), None
     else:
         raise CryptoError(
             detail="GPG config must specify either 'user_ids' or 'generate'"
