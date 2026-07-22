@@ -52,10 +52,10 @@ def _exc_stderr(exc: subprocess.CalledProcessError) -> str:
     return raw.decode(errors="replace") if raw else "unknown"
 
 
-def git_init(path: Path) -> None:
+def git_init(path: Path, *, branch: str) -> None:
     try:
         _ = subprocess.run(  # noqa: S603
-            [_GIT, "init", "-b", "master", str(path)],
+            [_GIT, "init", "-b", branch, str(path)],
             check=True,
             capture_output=True,
         )

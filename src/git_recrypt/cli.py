@@ -171,7 +171,19 @@ def run(
             rewrite_files_encrypted=result.files_encrypted,
         )
 
-    _console.print(f"\nTo apply: cd {result.work_dir} && git push --force --all")
+    _finalize_target(result.work_dir, result.branch)
+    _console.print(f"\nRewritten repo: {result.work_dir}")
+
+
+def _finalize_target(work_dir: Path, branch: str) -> None:
+    if not (work_dir / ".git").is_dir():
+        return
+    import subprocess  # noqa: PLC0415
+
+    _ = subprocess.run(  # noqa: S603
+        ["/usr/bin/git", "checkout", branch],
+        cwd=work_dir, capture_output=True, check=False,
+    )
 
 
 @app.command()

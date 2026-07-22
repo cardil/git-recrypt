@@ -44,9 +44,14 @@ def _git_config(repo: Path, key: str, value: str) -> None:
 
 def _run(args: list[str], cwd: Path, *, inp: bytes | None = None) -> bytes:
     """Run git command, return stdout. Raises RewriteError on failure."""
-    r = subprocess.run(  # noqa: S603
-        [_GIT, *args], cwd=cwd, capture_output=True, check=False, input=inp
-    )
+    try:
+        r = subprocess.run(  # noqa: S603
+            [_GIT, *args], cwd=cwd, capture_output=True, check=False, input=inp
+        )
+    except OSError as exc:
+        raise RewriteError(
+            phase=args[0], detail=f"git {args[0]} failed: {exc}"
+        ) from exc
     if r.returncode != 0:
         val: object = getattr(r, "stderr", None)
         raw: bytes = val if isinstance(val, bytes) else b""
@@ -86,6 +91,7 @@ class RewriteResult:
     files_encrypted: int
     elapsed_seconds: float
     setup_commits: tuple[str, ...]
+    branch: str = ""
 
 
 class HistoryRewriter:
@@ -102,11 +108,27 @@ class HistoryRewriter:
         self._commits_processed: int = 0
         self._sha_map: dict[str, str] = {}
         self._setup_commits: list[str] = []
+        self._branch: str = ""
+
+    def _resolve_branch(self) -> str:
+        m = self._config.manifest
+        branch = m.branches[0] if m.branches else "HEAD"
+        if branch != "HEAD":
+            return branch
+        src = self._config.repo_path
+        if not src.exists():
+            return "main"
+        try:
+            raw = _run(["symbolic-ref", "--short", "HEAD"], src)
+            return raw.decode().strip()
+        except RewriteError:
+            return "main"
 
     def run(self) -> RewriteResult:
         """Execute the full rewrite pipeline."""
         _assert_not_encrypted(self._config.repo_path, self._config.manifest)
         _assert_gpg_keys_available(self._config.manifest)
+        self._branch = self._resolve_branch()
         start = time.monotonic()
         try:
             self._create_target()
@@ -116,7 +138,7 @@ class HistoryRewriter:
             raise
         from git_recrypt._git import git_checkout  # noqa: PLC0415
 
-        git_checkout(self._config.work_dir, "master")
+        git_checkout(self._config.work_dir, self._branch)
         files_encrypted = count_encrypted_files(self._config.work_dir)
         self._save_state(last_sha)
         elapsed = time.monotonic() - start
@@ -126,6 +148,7 @@ class HistoryRewriter:
             files_encrypted=files_encrypted,
             elapsed_seconds=elapsed,
             setup_commits=tuple(self._setup_commits),
+            branch=self._branch,
         )
 
     def _emit(self, msg: str) -> None:
@@ -140,8 +163,8 @@ class HistoryRewriter:
         t = self._config.work_dir
         if t.exists():
             shutil.rmtree(t)
-        self._emit(f"Initializing target repo: {t}")
-        git_init(t)
+        self._emit(f"Initializing target repo: {t} (branch: {self._branch})")
+        git_init(t, branch=self._branch)
         _git_config(t, "user.name", "git-recrypt")
         _git_config(t, "user.email", "git-recrypt@localhost")
         _git_config(t, "commit.gpgsign", "false")
@@ -175,6 +198,8 @@ class HistoryRewriter:
         else:
             self._emit("Unlocking target repo (symmetric key)")
             run_git_crypt(t, ["unlock", str(self._config.key_file)])
+        self._emit("Copying remotes from source repo")
+        _copy_remotes(self._config.repo_path, t)
         self._emit("Pre-flight: testing lock/unlock roundtrip")
         _preflight_lock_unlock(t, self._config.key_file, is_gpg)
         self._emit("Target repo ready")
@@ -245,7 +270,7 @@ class HistoryRewriter:
             )
         _ = _run(["add", "-A"], tgt)
         _commit_with_meta(tgt, meta)
-        _ = _run(["checkout", "master"], tgt)
+        _ = _run(["checkout", self._branch], tgt)
         _ = _run(["merge", "--ff-only", "HEAD@{1}"], tgt)
 
     def _save_state(self, _last_sha: str) -> None:
@@ -291,6 +316,25 @@ def _preflight_lock_unlock(tgt: Path, key_file: Path, is_gpg: bool) -> None:
             phase="pre-flight",
             detail=f"lock/unlock roundtrip failed: {exc.detail}",
         ) from exc
+
+
+def _copy_remotes(src: Path, tgt: Path) -> None:
+    if not src.exists():
+        return
+    try:
+        raw = _run(["remote", "-v"], src)
+    except RewriteError:
+        return
+    seen: set[tuple[str, str]] = set()
+    for line in raw.decode(errors="replace").splitlines():
+        parts = line.split()
+        if len(parts) < 2:  # noqa: PLR2004
+            continue
+        name, url = parts[0], parts[1]
+        if (name, url) in seen:
+            continue
+        seen.add((name, url))
+        _ = _run(["remote", "add", name, url], tgt)
 
 
 def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:
