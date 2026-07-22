@@ -61,7 +61,7 @@ class RewriteVerifier:
     _matcher: PatternMatcher
     _mode: VerifyMode
     _progress_cb: Callable[[int, int], None] | None
-    _gpg_user_ids: list[str]
+    _gpg_user_ids: list[str]  # pyright: ignore[reportRedeclaration]
     _rewrite_commits: int
     _rewrite_files_encrypted: int
 
@@ -82,7 +82,7 @@ class RewriteVerifier:
         self._matcher = matcher
         self._mode = mode
         self._progress_cb = None
-        self._gpg_user_ids = []
+        self._gpg_user_ids: list[str] = []
         self._rewrite_commits = rewrite_commits
         self._rewrite_files_encrypted = rewrite_files_encrypted
 
@@ -202,18 +202,19 @@ class RewriteVerifier:
         total_files = 0
         commits_checked = 0
         checkout_indices = self._select_checkout_indices(pairs_to_check)
-        key_file = self._crypto.key_file
+        is_gpg = bool(self._gpg_user_ids)
+        checkout_key: Path | None = None if is_gpg else self._crypto.key_file
 
         for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
             if self._progress_cb is not None:
                 self._progress_cb(idx, len(pairs_to_check))
-            if idx in checkout_indices:
+            if is_gpg or idx in checkout_indices:
                 errs = verify_commit_checkout(
                     self._rewritten_path,
                     self._original_path,
                     orig_sha,
                     rew_sha,
-                    key_file,
+                    checkout_key,
                 )
             else:
                 errs = verify_commit_blobwise(

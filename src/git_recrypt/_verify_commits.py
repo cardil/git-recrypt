@@ -68,11 +68,12 @@ def verify_commit_checkout(
     orig_path: Path,
     orig_sha: str,
     rew_sha: str,
-    key_file: Path,
+    key_file: Path | None,
 ) -> list[str]:
     """Verify a commit by checking out, unlocking, and comparing disk files.
 
     Skips .gitattributes (legitimately differs).
+    key_file=None means GPG mode (bare git-crypt unlock).
     Returns list of error strings.
     """
     errors: list[str] = []
