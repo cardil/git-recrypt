@@ -237,9 +237,13 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     )
     _commit(repo, "ssh: rotate host keys")
 
-    # Commit 7: Let's Encrypt renewal
+    # Commit 7: Let's Encrypt renewal + live symlinks (mixed text + symlink commit)
     _write(_le_arc / "privkey2.pem", _FAKE_PRIVKEY.format(name="fakeprivkey2"))
     _write(_le_arc / "cert2.pem", _FAKE_CERT.format(name="fakecert2"))
+    _le_live = repo / "letsencrypt" / "live" / "example.com"
+    _le_live.mkdir(parents=True, exist_ok=True)
+    (_le_live / "privkey.pem").symlink_to("../../archive/example.com/privkey2.pem")
+    (_le_live / "cert.pem").symlink_to("../../archive/example.com/cert2.pem")
     _commit(repo, "letsencrypt: renewal 1")
 
     # Commit 8: Add borgmatic backup config
@@ -288,8 +292,13 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     _write(repo / "ups" / "upsmon.conf", _UPSMON_CONF)
     _commit(repo, "ups: add config")
 
-    # Commit 12: Second Let's Encrypt renewal
+    # Commit 12: Second LE renewal -- updates live symlinks (symlinks last in patch)
     _write(_le_arc / "privkey3.pem", _FAKE_PRIVKEY.format(name="fakeprivkey3"))
+    _write(_le_arc / "cert3.pem", _FAKE_CERT.format(name="fakecert3"))
+    (_le_live / "privkey.pem").unlink()
+    (_le_live / "privkey.pem").symlink_to("../../archive/example.com/privkey3.pem")
+    (_le_live / "cert.pem").unlink()
+    (_le_live / "cert.pem").symlink_to("../../archive/example.com/cert3.pem")
     _commit(repo, "letsencrypt: renewal 2")
 
     # Commit 13: Modify container secret
@@ -345,6 +354,13 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     _run_git(["add", "-A"], cwd=repo)
     _run_git(["commit", "-m", "Disable chronyd service"], cwd=repo)
 
+    # Commit 20: Rename symlink + text change in same commit
+    (symdir / "sshd.service").unlink()
+    (symdir / "openssh.service").symlink_to("/usr/lib/systemd/system/sshd.service")
+    _write(repo / "hostname", "baldur.example.org")
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-m", "Rename sshd symlink and update hostname"], cwd=repo)
+
     return repo
 
 
@@ -366,7 +382,7 @@ def test_etckeeper_rewrite_and_verify(
     rewritten = result.work_dir
 
     # Then: 22 commits rewritten
-    assert result.commits_rewritten == 22
+    assert result.commits_rewritten == 23
     assert result.files_encrypted > 0
 
     # .gitattributes present in every commit of the target
@@ -472,7 +488,7 @@ def test_etckeeper_source_not_mutated(
         capture_output=True,
         check=True,
     )
-    assert int(count_result.stdout.decode().strip()) == 22
+    assert int(count_result.stdout.decode().strip()) == 23
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +606,7 @@ def test_etckeeper_binary_deletion_handled(
     rewritten = result.work_dir
 
     # Then: rewrite completes with 22 commits
-    assert result.commits_rewritten == 22
+    assert result.commits_rewritten == 23
 
     # key4.db does NOT exist at HEAD (deleted in commit 16)
     key4_at_head = _git_show(rewritten, "HEAD", "pki/nssdb/key4.db")
@@ -632,12 +648,16 @@ def test_etckeeper_symlinks_handled(
     rewritten = result.work_dir
 
     # Then: rewrite completes with 22 commits
-    assert result.commits_rewritten == 22
+    assert result.commits_rewritten == 23
 
-    # sshd.service symlink still exists at HEAD (added in commit 17, not deleted)
+    # sshd.service renamed to openssh.service in commit 20
     sshd_path = "systemd/system/multi-user.target.wants/sshd.service"
     sshd = _git_show(rewritten, "HEAD", sshd_path)
-    assert sshd == b"/usr/lib/systemd/system/sshd.service"
+    assert sshd == b"", "sshd.service should not exist at HEAD (renamed)"
+
+    openssh_path = "systemd/system/multi-user.target.wants/openssh.service"
+    openssh = _git_show(rewritten, "HEAD", openssh_path)
+    assert openssh == b"/usr/lib/systemd/system/sshd.service"
 
     # python3 symlink updated to python3.14 (modified in commit 18)
     py3 = _git_show(rewritten, "HEAD", "alternatives/python3")

@@ -110,8 +110,12 @@ class HistoryRewriter:
         """Execute the full rewrite pipeline."""
         _assert_not_encrypted(self._config.repo_path, self._config.manifest)
         start = time.monotonic()
-        self._create_target()
-        last_sha = self._replay_commits()
+        try:
+            self._create_target()
+            last_sha = self._replay_commits()
+        except RewriteError as exc:
+            _enrich_error_with_debug_hint(exc, self._config.repo_path)
+            raise
         from git_recrypt._git import git_checkout  # noqa: PLC0415
 
         git_checkout(self._config.work_dir, "master")
@@ -199,7 +203,7 @@ class HistoryRewriter:
         if len(meta.parents) > 1:
             self._replay_merge_commit(tgt, meta)
             return
-        fmt = ["format-patch", "--stdout", "--binary"]
+        fmt = ["format-patch", "--stdout", "--binary", "--no-stat"]
         if is_root:
             fmt += ["--root", sha]
         else:
@@ -208,7 +212,8 @@ class HistoryRewriter:
         patch = _run(fmt, src)
         if not patch.strip():
             return
-        _apply_patch_and_binaries(src, tgt, sha, patch)
+        _dump_debug_patch(src, sha, patch)
+        _git_apply(tgt, patch)
         _ = _run(["add", "-A"], tgt)
         _commit_with_meta(tgt, meta)
 
@@ -251,199 +256,47 @@ class HistoryRewriter:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _SymlinkChange:
-    path: str
-    target: str | None
-    is_deletion: bool
+def _dump_debug_patch(src: Path, sha: str, patch: bytes) -> None:
+    from git_recrypt._state import debug_dir_for_repo, is_debug  # noqa: PLC0415
+
+    if not is_debug():
+        return
+    dbg = debug_dir_for_repo(src)
+    dbg.mkdir(parents=True, exist_ok=True)
+    _ = (dbg / f"{sha}.patch").write_bytes(patch)
 
 
-def _is_symlink_mode_line(line: str) -> bool:
-    return line.startswith(("new file mode 120000", "deleted file mode 120000")) or (
-        line.startswith("index ") and "120000" in line
+def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:
+    from git_recrypt._state import (  # noqa: PLC0415
+        DEBUG_ENV,
+        debug_dir_for_repo,
+        is_debug,
+    )
+
+    if is_debug():
+        return
+    exc.detail += (
+        f"\nRe-run with {DEBUG_ENV}=1 to dump debug data to {debug_dir_for_repo(src)}"
     )
 
 
-def _flush_symlink(
-    current_path: str,
-    is_symlink: bool,
-    is_deletion: bool,
-    hunk_lines: list[str],
-    changes: list[_SymlinkChange],
-) -> None:
-    if not (current_path and is_symlink):
-        return
-    if is_deletion:
-        changes.append(_SymlinkChange(path=current_path, target=None, is_deletion=True))
-        return
-    target: str | None = None
-    for hl in hunk_lines:
-        if hl.startswith("+") and not hl.startswith("+++"):
-            target = hl[1:].rstrip("\r\n")
-            break
-    if target is not None:
-        changes.append(
-            _SymlinkChange(path=current_path, target=target, is_deletion=False)
+def _git_apply(tgt: Path, patch: bytes) -> None:
+    ga = tgt / ".gitattributes"
+    ga_hidden = tgt / ".gitattributes.gcri-hidden"
+    _ = ga.rename(ga_hidden)
+    try:
+        r = subprocess.run(  # noqa: S603
+            [_GIT, "apply", "--whitespace=nowarn"],
+            cwd=tgt, input=patch, capture_output=True, check=False,
         )
-
-
-def _find_symlink_changes(patch: bytes) -> list[_SymlinkChange]:
-    changes: list[_SymlinkChange] = []
-    current_path: str = ""
-    is_symlink: bool = False
-    is_deletion: bool = False
-    hunk_lines: list[str] = []
-    in_hunk: bool = False
-
-    for raw_line in patch.split(b"\n"):
-        line = raw_line.decode(errors="replace")
-        if line.startswith("diff --git a/"):
-            _flush_symlink(current_path, is_symlink, is_deletion, hunk_lines, changes)
-            current_path = line.split(" b/", 1)[-1].rstrip("\r\n")
-            is_symlink = False
-            is_deletion = False
-            hunk_lines = []
-            in_hunk = False
-        elif _is_symlink_mode_line(line):
-            is_symlink = True
-            is_deletion = line.startswith("deleted file mode 120000")
-        elif line.startswith("@@"):
-            in_hunk = True
-        elif in_hunk:
-            hunk_lines.append(line)
-
-    _flush_symlink(current_path, is_symlink, is_deletion, hunk_lines, changes)
-    return changes
-
-
-def _strip_symlink_diffs(patch: bytes) -> bytes:
-    lines = patch.split(b"\n")
-    result: list[bytes] = []
-    skip = False
-    for line in lines:
-        if line.startswith(b"diff --git a/"):
-            skip = False
-        if skip:
-            continue
-        decoded = line.decode(errors="replace")
-        if decoded.startswith(("new file mode 120000", "deleted file mode 120000")) or (
-            "120000" in decoded and decoded.startswith("index ")
-        ):
-            skip = True
-            while result and not result[-1].startswith(b"diff --git"):
-                _ = result.pop()
-            _ = result.pop()
-            continue
-        result.append(line)
-    return b"\n".join(result)
-
-
-def _apply_symlink_changes(tgt: Path, changes: list[_SymlinkChange]) -> None:
-    for change in changes:
-        dest = tgt / change.path
-        if change.is_deletion:
-            if dest.is_symlink():
-                dest.unlink()
-        else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.is_symlink() or dest.exists():
-                dest.unlink()
-            if change.target is not None:
-                dest.symlink_to(change.target)
-
-
-def _apply_patch_and_binaries(
-    src: Path, tgt: Path, sha: str, patch: bytes,
-) -> None:
-    added, deleted = _find_binary_files(patch)
-    symlink_changes = _find_symlink_changes(patch)
-    has_specials = bool(added or deleted or symlink_changes)
-    text_patch = patch
-    if has_specials:
-        text_patch = _strip_binary_diffs(patch)
-        if symlink_changes:
-            text_patch = _strip_symlink_diffs(text_patch)
-    if _has_patchable_diffs(text_patch):
-        r = subprocess.run(
-            ["/usr/bin/patch", "-p1", "--no-backup-if-mismatch", "-s"],
-            cwd=tgt, input=text_patch, capture_output=True, check=False,
+    finally:
+        _ = ga_hidden.rename(ga)
+    if r.returncode != 0:
+        raw: bytes = r.stderr or r.stdout or b""
+        raise RewriteError(
+            phase="apply",
+            detail=f"git apply failed: {raw.decode(errors='replace')}",
         )
-        if r.returncode != 0:
-            raw: bytes = r.stderr or r.stdout or b""
-            raise RewriteError(
-                phase="patch",
-                detail=f"patch -p1 failed: {raw.decode(errors='replace')}",
-            )
-    for fp in added:
-        dest = tgt / fp
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        blob = _run(["show", f"{sha}:{fp}"], src)
-        _ = dest.write_bytes(blob)
-    for fp in deleted:
-        dest = tgt / fp
-        if dest.exists():
-            dest.unlink()
-    _apply_symlink_changes(tgt, symlink_changes)
-
-
-def _has_patchable_diffs(patch: bytes) -> bool:
-    """Return True if patch has at least one diff block that patch(1) can apply.
-
-    A diff block is patchable when it contains more than just a bare
-    'diff --git' header -- i.e. it has index/mode lines, hunk markers, or
-    empty-file markers.  Stripped binary-only patches leave bare 'diff --git'
-    lines with nothing after them; those must not be passed to patch(1).
-    """
-    lines = patch.split(b"\n")
-    in_diff = False
-    for line in lines:
-        if line.startswith(b"diff --git a/"):
-            in_diff = True
-            continue
-        if in_diff:
-            if line.startswith(b"diff --git a/"):
-                continue
-            if line.strip():
-                return True
-    return False
-
-
-def _find_binary_files(patch: bytes) -> tuple[list[str], list[str]]:
-    added: list[str] = []
-    deleted: list[str] = []
-    current: str = ""
-    is_deletion: bool = False
-    for line in patch.split(b"\n"):
-        if line.startswith(b"diff --git a/"):
-            current = line.decode(errors="replace").split(" b/", 1)[-1]
-            is_deletion = False
-        elif line.startswith(b"deleted file mode"):
-            is_deletion = True
-        elif line.startswith(b"GIT binary patch") and current:
-            if is_deletion:
-                deleted.append(current)
-            else:
-                added.append(current)
-            current = ""
-            is_deletion = False
-    return added, deleted
-
-
-def _strip_binary_diffs(patch: bytes) -> bytes:
-    lines = patch.split(b"\n")
-    result: list[bytes] = []
-    skip = False
-    for line in lines:
-        if line.startswith(b"diff --git a/"):
-            skip = False
-        if line.startswith(b"GIT binary patch"):
-            skip = True
-            while result and not result[-1].startswith(b"diff --git"):
-                _ = result.pop()
-            continue
-        if not skip:
-            result.append(line)
-    return b"\n".join(result)
 
 
 def _rev_parse(repo: Path) -> str:

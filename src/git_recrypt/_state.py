@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
+
+DEBUG_ENV: Final = "GIT_RECRYPT_DEBUG"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +30,14 @@ def state_dir_for_repo(source_repo: Path) -> Path:
     """
     digest = hashlib.sha256(str(source_repo.resolve()).encode()).hexdigest()[:16]
     return Path.home() / ".cache" / "git-recrypt" / digest
+
+
+def debug_dir_for_repo(source_repo: Path) -> Path:
+    return state_dir_for_repo(source_repo) / "debug"
+
+
+def is_debug() -> bool:
+    return bool(os.environ.get(DEBUG_ENV))
 
 
 def save_commit_map(state_dir: Path, mapping: dict[str, str]) -> None:
