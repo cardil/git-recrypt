@@ -13,7 +13,6 @@ from git_recrypt._git import (
 )
 from git_recrypt._verify_commits import (
     FileVerification,
-    verify_commit_blobwise,
     verify_commit_checkout,
     verify_head_encryption,
 )
@@ -107,28 +106,8 @@ class RewriteVerifier:
                 errors=tuple(rewrite_errors),
             )
 
-        key_file = self._crypto.key_file
         is_gpg = bool(self._gpg_user_ids)
-        preflight_key = None if is_gpg else key_file
-
-        preflight = run_preflight(
-            rewritten_path=self._rewritten_path,
-            matcher=self._matcher,
-            key_file=preflight_key,
-            gpg_user_ids=self._gpg_user_ids,
-        )
-
-        if not preflight.passed:
-            return VerifyResult(
-                passed=False,
-                commits_verified=0,
-                commits_total=0,
-                files_verified=0,
-                encrypted_files=(),
-                errors=preflight.errors,
-                encrypted_files_count=preflight.encrypted_files_count,
-                identities_verified=preflight.identities_verified,
-            )
+        preflight_key: Path | None = None if is_gpg else self._crypto.key_file
 
         original_commits = get_commit_list(self._original_path)
         commits_total = len(original_commits)
@@ -143,6 +122,25 @@ class RewriteVerifier:
                 files_verified=0,
                 encrypted_files=(),
                 errors=(str(exc),),
+            )
+
+        lock_unlock_shas = self._select_lock_unlock_shas(pairs)
+        preflight = run_preflight(
+            rewritten_path=self._rewritten_path,
+            matcher=self._matcher,
+            key_file=preflight_key,
+            gpg_user_ids=self._gpg_user_ids,
+            lock_unlock_shas=lock_unlock_shas,
+        )
+
+        if not preflight.passed:
+            return VerifyResult(
+                passed=False,
+                commits_verified=0,
+                commits_total=0,
+                files_verified=0,
+                encrypted_files=(),
+                errors=preflight.errors,
                 encrypted_files_count=preflight.encrypted_files_count,
                 identities_verified=preflight.identities_verified,
             )
@@ -154,10 +152,6 @@ class RewriteVerifier:
         all_errors, total_files, commits_checked = self._run_commit_verification(
             pairs_to_check
         )
-
-        if not all_errors:
-            lock_errors = self._verify_final_locked_state()
-            all_errors.extend(lock_errors)
 
         all_encrypted = verify_head_encryption(
             self._original_path,
@@ -201,46 +195,22 @@ class RewriteVerifier:
         all_errors: list[str] = []
         total_files = 0
         commits_checked = 0
-        checkout_indices = self._select_checkout_indices(pairs_to_check)
-        is_gpg = bool(self._gpg_user_ids)
-        checkout_key: Path | None = None if is_gpg else self._crypto.key_file
 
         for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
             if self._progress_cb is not None:
                 self._progress_cb(idx, len(pairs_to_check))
-            if is_gpg or idx in checkout_indices:
-                errs = verify_commit_checkout(
-                    self._rewritten_path,
-                    self._original_path,
-                    orig_sha,
-                    rew_sha,
-                    checkout_key,
-                )
-            else:
-                errs = verify_commit_blobwise(
-                    self._original_path,
-                    self._rewritten_path,
-                    orig_sha,
-                    rew_sha,
-                    self._matcher,
-                    self._crypto,
-                )
+            errs = verify_commit_checkout(
+                self._rewritten_path,
+                self._original_path,
+                orig_sha,
+                rew_sha,
+            )
             all_errors.extend(errs)
             commits_checked += 1
             if all_errors:
                 break
 
         return all_errors, total_files, commits_checked
-
-    def _select_checkout_indices(self, pairs: list[tuple[str, str]]) -> set[int]:
-        """Select indices for checkout-based verification: tip (0) + 1 random middle."""
-        if not pairs:
-            return set()
-        indices: set[int] = {0}
-        middle = list(range(1, len(pairs) - 1)) if len(pairs) > 2 else []  # noqa: PLR2004
-        if middle:
-            indices.add(random.choice(middle))  # noqa: S311
-        return indices
 
     def _verify_final_locked_state(self) -> list[str]:
         """Verify repo is in locked state after all commits verified."""
@@ -266,6 +236,15 @@ class RewriteVerifier:
                     f"Post-verify: {fp.name} is not locked (missing GITCRYPT header)"
                 )
         return errors
+
+    @staticmethod
+    def _select_lock_unlock_shas(pairs: list[tuple[str, str]]) -> list[str]:
+        if not pairs:
+            return []
+        shas = [pairs[0][1]]
+        if len(pairs) > 2:  # noqa: PLR2004
+            shas.append(pairs[len(pairs) // 2][1])
+        return shas
 
     def _select_fast_sample(
         self, pairs: list[tuple[str, str]]

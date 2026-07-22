@@ -12,7 +12,7 @@ from git_recrypt._git import (
     run_git_crypt_status,
     run_git_crypt_unlock,
 )
-from git_recrypt.crypto import GITCRYPT_HEADER, is_encrypted
+from git_recrypt.crypto import GITCRYPT_HEADER
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
@@ -36,25 +36,47 @@ def run_preflight(
     matcher: PatternMatcher,
     key_file: Path | None,
     gpg_user_ids: list[str],
+    lock_unlock_shas: list[str] | None = None,
 ) -> PreflightResult:
-    """Run all three preflight phases."""
+    """Run preflight phases: git-crypt status + lock/unlock roundtrips.
+
+    lock_unlock_shas: rewritten commit SHAs to test lock/unlock at (tip + middle).
+    """
     status_result = _phase_git_crypt_status(rewritten_path, matcher)
     if not status_result.passed:
         return status_result
 
-    roundtrip_result = _phase_lock_unlock_roundtrip(
-        rewritten_path,
-        status_result.encrypted_files_count,
-        key_file,
-        gpg_user_ids,
-    )
-    if not roundtrip_result.passed:
-        return roundtrip_result
+    shas = lock_unlock_shas or []
+    if status_result.encrypted_files_count == 0:
+        shas = []
+    for sha in shas:
+        from git_recrypt._git import git_checkout  # noqa: PLC0415
+
+        try:
+            git_checkout(rewritten_path, sha)
+        except CryptoError as exc:
+            return PreflightResult(
+                passed=False,
+                encrypted_files_count=status_result.encrypted_files_count,
+                identities_verified=0,
+                errors=(f"Phase 2 checkout {sha[:8]} failed: {exc}",),
+            )
+        error = _test_lock_unlock_roundtrip(rewritten_path, key_file)
+        if error is not None:
+            return PreflightResult(
+                passed=False,
+                encrypted_files_count=status_result.encrypted_files_count,
+                identities_verified=0,
+                errors=(f"Phase 2 at {sha[:8]}: {error}",),
+            )
+
+    is_gpg = key_file is None
+    identities_count = len(gpg_user_ids) if is_gpg else 1
 
     return PreflightResult(
         passed=True,
         encrypted_files_count=status_result.encrypted_files_count,
-        identities_verified=roundtrip_result.identities_verified,
+        identities_verified=identities_count,
         errors=(),
     )
 
@@ -96,49 +118,7 @@ def _phase_git_crypt_status(
     )
 
 
-def _phase_lock_unlock_roundtrip(
-    rewritten_path: Path,
-    encrypted_count: int,
-    key_file: Path | None,
-    gpg_user_ids: list[str],
-) -> PreflightResult:
-    """Phase 2: test lock/unlock roundtrip for each identity."""
-    is_gpg = key_file is None
-    identities = gpg_user_ids if is_gpg else ["symmetric"]
-
-    if is_gpg:
-        # GPG mode: single unlock/lock cycle using system keyring.
-        # Per-identity isolation requires interactive passphrase, so we test
-        # one roundtrip and count all configured user_ids as verified.
-        error = _test_symmetric_roundtrip(rewritten_path, None, "gpg")
-        if error is not None:
-            return PreflightResult(
-                passed=False,
-                encrypted_files_count=encrypted_count,
-                identities_verified=0,
-                errors=(error,),
-            )
-    else:
-        for identity in identities:
-            error = _test_symmetric_roundtrip(rewritten_path, key_file, identity)
-            if error is not None:
-                return PreflightResult(
-                    passed=False,
-                    encrypted_files_count=encrypted_count,
-                    identities_verified=0,
-                    errors=(error,),
-                )
-
-    return PreflightResult(
-        passed=True,
-        encrypted_files_count=encrypted_count,
-        identities_verified=len(identities),
-        errors=(),
-    )
-
-
 def _collect_encrypted_disk_files_raw(rewritten_path: Path, limit: int) -> list[Path]:
-    """Collect up to `limit` files from working tree that have GITCRYPT header."""
     collected: list[Path] = []
     for fp in rewritten_path.rglob("*"):
         if not fp.is_file():
@@ -159,41 +139,29 @@ def _collect_encrypted_disk_files_raw(rewritten_path: Path, limit: int) -> list[
     return collected
 
 
-def _test_symmetric_roundtrip(
+def _test_lock_unlock_roundtrip(
     rewritten_path: Path,
     key_file: Path | None,
-    identity_label: str,
 ) -> str | None:
-    """Test unlock -> check plaintext -> lock -> check encrypted for symmetric key."""
-    encrypted_before = _collect_encrypted_disk_files_raw(rewritten_path, limit=5)
+    """Lock, verify encrypted on disk, unlock, verify plaintext."""
+    with contextlib.suppress(CryptoError):
+        run_git_crypt_lock(rewritten_path)
+
+    encrypted_files = _collect_encrypted_disk_files_raw(rewritten_path, limit=5)
+    if not encrypted_files:
+        with contextlib.suppress(CryptoError):
+            run_git_crypt_unlock(rewritten_path, key_file)
+        return "no encrypted files found after lock"
 
     try:
         run_git_crypt_unlock(rewritten_path, key_file)
     except CryptoError as exc:
-        return f"Phase 2 unlock failed for {identity_label}: {exc}"
+        return f"unlock failed: {exc}"
 
-    for fp in encrypted_before:
+    for fp in encrypted_files:
         content = fp.read_bytes()
         if content[:10] == GITCRYPT_HEADER:
-            with contextlib.suppress(CryptoError):
-                run_git_crypt_lock(rewritten_path)
-            return (
-                f"Phase 2: after unlock, {fp.name} still has GITCRYPT header"
-                f" (identity: {identity_label})"
-            )
-
-    try:
-        run_git_crypt_lock(rewritten_path)
-    except CryptoError as exc:
-        return f"Phase 2 lock failed for {identity_label}: {exc}"
-
-    for fp in encrypted_before:
-        content = fp.read_bytes()
-        if not is_encrypted(content):
-            return (
-                f"Phase 2: after lock, {fp.name} missing GITCRYPT header"
-                f" (identity: {identity_label})"
-            )
+            return f"after unlock, {fp.name} still encrypted"
 
     return None
 

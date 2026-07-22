@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,8 +9,6 @@ from git_recrypt._git import (
     get_file_content,
     get_file_list,
     git_checkout,
-    run_git_crypt_lock,
-    run_git_crypt_unlock,
 )
 from git_recrypt.crypto import GITCRYPT_HEADER, CryptoEngine, is_encrypted
 from git_recrypt.errors import CryptoError
@@ -68,12 +65,10 @@ def verify_commit_checkout(
     orig_path: Path,
     orig_sha: str,
     rew_sha: str,
-    key_file: Path | None,
 ) -> list[str]:
-    """Verify a commit by checking out, unlocking, and comparing disk files.
+    """Verify a commit by checking out and comparing disk files.
 
-    Skips .gitattributes (legitimately differs).
-    key_file=None means GPG mode (bare git-crypt unlock).
+    Repo must already be unlocked. Skips .gitattributes and .git-crypt/.
     Returns list of error strings.
     """
     errors: list[str] = []
@@ -82,14 +77,13 @@ def verify_commit_checkout(
     except CryptoError as exc:
         return [f"commit {rew_sha[:8]}: checkout failed: {exc}"]
 
-    try:
-        run_git_crypt_unlock(rewritten_path, key_file)
-    except CryptoError as exc:
-        return [f"commit {rew_sha[:8]}: unlock failed: {exc}"]
+    rew_files = set(get_file_list(rewritten_path, rew_sha))
+    if ".gitattributes" not in rew_files:
+        errors.append(f"commit {rew_sha[:8]}: .gitattributes missing")
 
     orig_files = get_file_list(orig_path, orig_sha)
     for fp in orig_files:
-        if fp == ".gitattributes":
+        if fp == ".gitattributes" or fp.startswith(".git-crypt/"):
             continue
         disk_path = rewritten_path / fp
         if not disk_path.exists():
@@ -101,9 +95,6 @@ def verify_commit_checkout(
             errors.append(
                 f"commit {rew_sha[:8]}: {fp}: disk content differs from original"
             )
-
-    with contextlib.suppress(CryptoError):
-        run_git_crypt_lock(rewritten_path)
 
     return errors
 
