@@ -117,12 +117,18 @@ class HistoryRewriter:
             return branch
         src = self._config.repo_path
         if not src.exists():
-            return "main"
-        try:
-            raw = _run(["symbolic-ref", "--short", "HEAD"], src)
-            return raw.decode().strip()
-        except RewriteError:
-            return "main"
+            raise RewriteError(
+                phase="pre-check",
+                detail=f"Source repo not found: {src}",
+            )
+        raw = _run(["symbolic-ref", "--short", "HEAD"], src)
+        resolved = raw.decode().strip()
+        if not resolved:
+            raise RewriteError(
+                phase="pre-check",
+                detail=f"Cannot resolve HEAD branch in {src}",
+            )
+        return resolved
 
     def run(self) -> RewriteResult:
         """Execute the full rewrite pipeline."""
