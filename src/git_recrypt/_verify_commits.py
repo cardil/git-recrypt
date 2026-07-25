@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from git_recrypt._git import (
     get_file_content,
@@ -17,6 +21,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from git_recrypt.patterns import PatternMatcher
+
+_DIFF: Final[str | None] = shutil.which("diff")
+_GIT_BIN: Final[str] = shutil.which("git") or "git"
+_RelFn = Callable[[str], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,18 +68,91 @@ def check_encrypted_file(errors: list[str], ctx: FileCheckContext) -> None:
         )
 
 
+def _parse_diff_stdout(
+    lines: list[str],
+    sha: str,
+    tmpdir_prefix: str,
+    tmpdir: str,
+    rel: _RelFn,
+) -> list[str]:
+    errors: list[str] = []
+    for line in lines:
+        line = line.strip()  # noqa: PLW2901
+        if not line:
+            continue
+        if line.startswith("Files ") and " differ" in line:
+            # diff -rq format: "Files /a/foo and /b/foo differ"
+            path_a = line.split(" and ", 1)[0].removeprefix("Files ").strip()
+            errors.append(f"commit {sha}: content mismatch: {rel(path_a)}")
+        elif line.startswith("Only in ") and ": " in line:
+            # diff -rq format: "Only in /dir: filename"
+            rest = line.removeprefix("Only in ").strip()
+            dir_part, name = rest.split(": ", 1)
+            full = dir_part.rstrip("/") + "/" + name
+            rel_path = rel(full)
+            in_orig = (
+                dir_part.startswith(tmpdir_prefix.rstrip("/"))
+                or dir_part == tmpdir.rstrip("/")
+            )
+            if in_orig:
+                errors.append(
+                    f"commit {sha}: file missing from rewritten tree: {rel_path}"
+                )
+            else:
+                errors.append(
+                    f"commit {sha}: unexpected extra file in rewritten tree: {rel_path}"
+                )
+    return errors
+
+
+def _parse_diff_stderr(lines: list[str], sha: str, rel: _RelFn) -> list[str]:
+    errors: list[str] = []
+    for line in lines:
+        line = line.strip()  # noqa: PLW2901
+        if not line:
+            continue
+        # diff stderr format: "diff: /path: No such file or directory" (broken symlink)
+        if line.startswith("diff:") and "No such file or directory" in line:
+            path_part = line.removeprefix("diff:").split(":")[0].strip()
+            errors.append(f"commit {sha}: inaccessible path: {rel(path_part)}")
+    return errors
+
+
+def _parse_diff_output(
+    stdout: str,
+    stderr: str,
+    tmpdir: str,
+    rewritten_path: Path,
+    rew_sha: str,
+) -> list[str]:
+    sha = rew_sha[:8]
+    tmpdir_prefix = tmpdir.rstrip("/") + "/"
+    rew_prefix = str(rewritten_path).rstrip("/") + "/"
+
+    def rel(raw: str) -> str:
+        if raw.startswith(tmpdir_prefix):
+            return raw[len(tmpdir_prefix):]
+        if raw.startswith(rew_prefix):
+            return raw[len(rew_prefix):]
+        return raw
+
+    return [
+        *_parse_diff_stdout(stdout.splitlines(), sha, tmpdir_prefix, tmpdir, rel),
+        *_parse_diff_stderr(stderr.splitlines(), sha, rel),
+    ]
+
+
 def verify_commit_checkout(
     rewritten_path: Path,
     orig_path: Path,
     orig_sha: str,
     rew_sha: str,
 ) -> list[str]:
-    """Verify a commit by checking out and comparing disk files.
+    if _DIFF is None:
+        return [f"commit {rew_sha[:8]}: diff not found in PATH"]
 
-    Repo must already be unlocked. Skips .gitattributes and .git-crypt/.
-    Returns list of error strings.
-    """
     errors: list[str] = []
+
     try:
         git_checkout(rewritten_path, rew_sha)
     except CryptoError as exc:
@@ -81,28 +162,46 @@ def verify_commit_checkout(
     if ".gitattributes" not in rew_files:
         errors.append(f"commit {rew_sha[:8]}: .gitattributes missing")
 
-    orig_files = get_file_list(orig_path, orig_sha)
-    for fp in orig_files:
-        if fp == ".gitattributes" or fp.startswith(".git-crypt/"):
-            continue
-        disk_path = rewritten_path / fp
-        if not disk_path.exists():
-            errors.append(f"commit {rew_sha[:8]}: file missing on disk: {fp}")
-            continue
-        disk_content = disk_path.read_bytes()
-        orig_content = get_file_content(orig_path, orig_sha, fp)
-        if disk_content != orig_content:
-            errors.append(
-                f"commit {rew_sha[:8]}: {fp}: disk content differs from original"
-            )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wt_cmd = [
+            _GIT_BIN, "-C", str(orig_path),
+            "worktree", "add", "--detach", tmpdir, orig_sha,
+        ]
+        wt_result = subprocess.run(wt_cmd, capture_output=True, check=False)  # noqa: S603
+        if wt_result.returncode != 0:
+            stderr_str = wt_result.stderr.decode(errors="replace")
+            return [f"commit {rew_sha[:8]}: worktree add failed: {stderr_str.strip()}"]
 
-    orig_file_set = set(orig_files)
-    for fp in rew_files:
-        if fp == ".gitattributes" or fp.startswith(".git-crypt/"):
-            continue
-        if fp not in orig_file_set:
-            errors.append(
-                f"commit {rew_sha[:8]}: unexpected extra file in rewritten tree: {fp}"
+        try:
+            diff_result = subprocess.run(  # noqa: S603
+                [
+                    _DIFF,
+                    "-rq",
+                    "--no-dereference",
+                    "--exclude=.git",
+                    "--exclude=.gitattributes",
+                    "--exclude=.git-crypt",
+                    tmpdir,
+                    str(rewritten_path),
+                ],
+                capture_output=True,
+                check=False,
+            )
+            # diff exit codes: 0=identical, 1=differences found, 2=trouble
+            if diff_result.returncode == 2:  # noqa: PLR2004
+                stderr_str = diff_result.stderr.decode(errors="replace")
+                errors.append(f"commit {rew_sha[:8]}: diff error: {stderr_str.strip()}")
+            else:
+                stdout = diff_result.stdout.decode(errors="replace")
+                stderr = diff_result.stderr.decode(errors="replace")
+                errors.extend(
+                    _parse_diff_output(stdout, stderr, tmpdir, rewritten_path, rew_sha)
+                )
+        finally:
+            subprocess.run(  # noqa: S603
+                [_GIT_BIN, "-C", str(orig_path), "worktree", "remove", "--force", tmpdir],  # noqa: E501
+                capture_output=True,
+                check=False,
             )
 
     return errors

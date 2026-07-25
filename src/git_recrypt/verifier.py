@@ -253,7 +253,9 @@ class RewriteVerifier:
 
         add(pairs[0])
         add(pairs[-1])
-        sample_count = max(5, min(30, len(pairs) // 10))
-        for pair in random.sample(pairs, min(sample_count, len(pairs))):
-            add(pair)
+        remaining = [p for p in pairs if p not in seen]
+        sample_count = min(23, len(remaining))
+        if sample_count > 0:
+            for pair in random.sample(remaining, sample_count):
+                add(pair)
         return selected
