@@ -147,14 +147,14 @@ def test_symmetric_key_generate(tmp_path: Path, mock_detection: MagicMock) -> No
     # Given: user selects symmetric + generate
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "provided", "root", "HEAD"]
+                ["generic", "symmetric", "generate", "root", "HEAD"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -308,7 +308,7 @@ def test_conflict_overwrite(tmp_path: Path, mock_detection: MagicMock) -> None:
     output = tmp_path / "manifest.yaml"
     _ = output.write_text(_minimal_manifest_yaml(), encoding="utf-8")
 
-    # select: profile, key_type, sym_mode, passphrase, introduce_at, branches, conflict
+    # select: profile, key_type, sym_mode, introduce_at, branches, conflict
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
@@ -319,7 +319,6 @@ def test_conflict_overwrite(tmp_path: Path, mock_detection: MagicMock) -> None:
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "root",
                     "HEAD",
                     "overwrite",
@@ -347,7 +346,7 @@ def test_conflict_merge(tmp_path: Path, mock_detection: MagicMock) -> None:
     output = tmp_path / "manifest.yaml"
     _ = output.write_text(_minimal_manifest_yaml(["old/**"]), encoding="utf-8")
 
-    # select: profile, key_type, sym_mode, passphrase, introduce_at, branches, conflict
+    # select: profile, key_type, sym_mode, introduce_at, branches, conflict
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
@@ -358,7 +357,6 @@ def test_conflict_merge(tmp_path: Path, mock_detection: MagicMock) -> None:
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "root",
                     "HEAD",
                     "merge",
@@ -386,7 +384,7 @@ def test_conflict_different_path(tmp_path: Path, mock_detection: MagicMock) -> N
     _ = output.write_text(_minimal_manifest_yaml(), encoding="utf-8")
     alt_path = tmp_path / "alt-manifest.yaml"
 
-    # select: profile, key_type, sym_mode, passphrase, introduce_at, branches, conflict
+    # select: profile, key_type, sym_mode, introduce_at, branches, conflict
     # path order: new_manifest_path
     # text order: custom_pattern_stop, exclusion_stop
     with (
@@ -398,7 +396,6 @@ def test_conflict_different_path(tmp_path: Path, mock_detection: MagicMock) -> N
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "root",
                     "HEAD",
                     "save to different path",
@@ -426,7 +423,7 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
     # Given: user selects "specific SHA" and provides a valid SHA
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, sha_value, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
@@ -437,7 +434,6 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "specific SHA",
                     "HEAD",
                 ]
@@ -462,14 +458,14 @@ def test_specific_branch_selection(tmp_path: Path, mock_detection: MagicMock) ->
     # Given: user selects "specific" branches and provides branch names
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, branch_names, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "provided", "root", "specific"]
+                ["generic", "symmetric", "generate", "root", "specific"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -492,14 +488,14 @@ def test_exclusion_patterns(tmp_path: Path, mock_detection: MagicMock) -> None:
     # Given: user adds two exclusion patterns then stops
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, excl_1, excl_2, excl_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "provided", "root", "HEAD"]
+                ["generic", "symmetric", "generate", "root", "HEAD"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -610,7 +606,7 @@ def test_conflict_merge_deduplicates(tmp_path: Path, mock_detection: MagicMock) 
         _minimal_manifest_yaml(["secrets/**", "other/**"]), encoding="utf-8"
     )
 
-    # select: profile, key_type, sym_mode, passphrase, introduce_at, branches, conflict
+    # select: profile, key_type, sym_mode, introduce_at, branches, conflict
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
@@ -621,7 +617,6 @@ def test_conflict_merge_deduplicates(tmp_path: Path, mock_detection: MagicMock) 
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "root",
                     "HEAD",
                     "merge",
@@ -647,14 +642,14 @@ def test_all_branches_selection(tmp_path: Path, mock_detection: MagicMock) -> No
     # Given: user selects "all" branches
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "provided", "root", "all"]
+                ["generic", "symmetric", "generate", "root", "all"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -662,8 +657,8 @@ def test_all_branches_selection(tmp_path: Path, mock_detection: MagicMock) -> No
     ):
         manifest = run_wizard(tmp_path, output)
 
-    # Then
-    assert manifest.branches == ["*"]
+    # Then: "all" is not yet supported, falls back to HEAD
+    assert manifest.branches == ["HEAD"]
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +672,7 @@ def test_first_match_introduction_point(
     # Given: user selects "first-match" introduction point
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, passphrase_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
@@ -688,7 +683,6 @@ def test_first_match_introduction_point(
                     "generic",
                     "symmetric",
                     "generate",
-                    "provided",
                     "first-match",
                     "HEAD",
                 ]

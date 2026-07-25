@@ -158,7 +158,22 @@ def setup_gpg_repo(repo_path: Path, user_ids: list[str]) -> Path:
     return export_gpg_key(repo_path)
 
 
-_GIT_BIN: Final = "/usr/bin/git"
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT_BIN: Final = _find_git()
+
+_GPG_ALGO_MAP: Final[dict[str, tuple[str, str, str, str]]] = {
+    # algorithm -> (primary_type, primary_extra, sub_type, sub_extra)
+    "ed25519": ("EDDSA", "Key-Curve: ed25519", "ECDH", "Subkey-Curve: cv25519"),
+    "rsa4096": ("RSA", "Key-Length: 4096", "RSA", "Subkey-Length: 4096"),
+    "rsa2048": ("RSA", "Key-Length: 2048", "RSA", "Subkey-Length: 2048"),
+}
 
 
 def _resolve_gpg_key_via_temp(user_ids: list[str]) -> Path:
@@ -170,6 +185,10 @@ def _resolve_gpg_key_via_temp(user_ids: list[str]) -> Path:
     tmp_dir = tempfile.mkdtemp(prefix="gcri-gpg-setup-")
     tmp_repo = Path(tmp_dir) / "repo"
     _ = _run_cmd([_GIT_BIN, "init", str(tmp_repo)])
+    _ = _run_cmd([_GIT_BIN, "-C", str(tmp_repo), "config", "user.name", "git-recrypt"])
+    _ = _run_cmd(
+        [_GIT_BIN, "-C", str(tmp_repo), "config", "user.email", "git-recrypt@localhost"]
+    )
     _ = _run_cmd(
         [_GIT_BIN, "commit", "--allow-empty", "-m", "init"],
         cwd=tmp_repo,
@@ -205,11 +224,21 @@ def generate_gpg_key(
             f"Enter passphrase for GPG key ({name} <{email}>): "
         )
 
+    algo_info = _GPG_ALGO_MAP.get(algorithm)
+    if algo_info is not None:
+        primary_type, primary_extra, sub_type, sub_extra = algo_info
+    else:
+        primary_type, primary_extra, sub_type, sub_extra = algorithm, "", algorithm, ""
+
+    primary_extra_line = f"{primary_extra}\n" if primary_extra else ""
+    sub_extra_line = f"{sub_extra}\n" if sub_extra else ""
     batch_input = (
         f"%echo Generating GPG key\n"
-        f"Key-Type: {algorithm}\n"
+        f"Key-Type: {primary_type}\n"
+        f"{primary_extra_line}"
         f"Key-Usage: sign\n"
-        f"Subkey-Type: {algorithm}\n"
+        f"Subkey-Type: {sub_type}\n"
+        f"{sub_extra_line}"
         f"Subkey-Usage: encrypt\n"
         f"Name-Real: {name}\n"
         f"Name-Email: {email}\n"

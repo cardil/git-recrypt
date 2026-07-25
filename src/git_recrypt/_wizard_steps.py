@@ -124,7 +124,6 @@ def step_key() -> KeyConfig:
 
 
 def _step_symmetric_key() -> KeyConfig:
-    """Step 4a: Symmetric key sub-flow."""
     mode = _ask_str(
         questionary.select(
             "Symmetric key mode:", choices=_SYM_MODE_CHOICES, default="generate"
@@ -137,14 +136,6 @@ def _step_symmetric_key() -> KeyConfig:
             "key file path",
         )
         return KeyConfig(symmetric=SymmetricKeyConfig(key_file=key_path))
-    _ = _ask_str(
-        questionary.select(
-            "Passphrase mode for generated key:",
-            choices=_PASSPHRASE_CHOICES,
-            default="provided",
-        ),
-        "passphrase mode",
-    )
     return KeyConfig(symmetric=SymmetricKeyConfig(key_file="generate"))
 
 
@@ -199,7 +190,11 @@ def step_branches() -> list[str]:
         "branch selection",
     )
     if choice == "all":
-        return ["*"]
+        _console.print(
+            "[yellow]Multi-branch rewrite is planned but not yet supported. "
+            "Falling back to HEAD.[/yellow]"
+        )
+        return ["HEAD"]
     if choice == "specific":
         raw = _ask_str(
             questionary.text("Branch names (comma-separated):"),

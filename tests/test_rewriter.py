@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -15,7 +16,16 @@ from git_recrypt.rewriter import HistoryRewriter, RewriteConfig
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT = _find_git()
 _GITCRYPT_HEADER = b"\x00GITCRYPT\x00"
 
 

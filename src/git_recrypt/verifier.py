@@ -9,18 +9,17 @@ from typing import TYPE_CHECKING
 
 from git_recrypt._git import (
     get_commit_list,
+    get_file_list,
     run_git_crypt_status,
 )
 from git_recrypt._verify_commits import (
-    FileVerification,
     verify_commit_checkout,
-    verify_head_encryption,
 )
 from git_recrypt._verify_helpers import (
     build_commit_pairs,
     run_preflight,
 )
-from git_recrypt.crypto import CryptoEngine, is_encrypted
+from git_recrypt.crypto import is_encrypted
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
@@ -45,7 +44,7 @@ class VerifyResult:
     commits_verified: int
     commits_total: int
     files_verified: int
-    encrypted_files: tuple[FileVerification, ...]
+    encrypted_files: tuple[str, ...]
     errors: tuple[str, ...]
     encrypted_files_count: int = field(default=0)
     identities_verified: int = field(default=0)
@@ -56,7 +55,7 @@ class RewriteVerifier:
 
     _original_path: Path
     _rewritten_path: Path
-    _crypto: CryptoEngine
+    _key_file: Path
     _matcher: PatternMatcher
     _mode: VerifyMode
     _progress_cb: Callable[[int, int], None] | None
@@ -77,7 +76,7 @@ class RewriteVerifier:
         """Initialize the verifier."""
         self._original_path = original_path
         self._rewritten_path = rewritten_path
-        self._crypto = CryptoEngine(key_file=key_file)
+        self._key_file = key_file
         self._matcher = matcher
         self._mode = mode
         self._progress_cb = None
@@ -107,7 +106,7 @@ class RewriteVerifier:
             )
 
         is_gpg = bool(self._gpg_user_ids)
-        preflight_key: Path | None = None if is_gpg else self._crypto.key_file
+        preflight_key: Path | None = None if is_gpg else self._key_file
 
         original_commits = get_commit_list(self._original_path)
         commits_total = len(original_commits)
@@ -153,20 +152,12 @@ class RewriteVerifier:
             pairs_to_check
         )
 
-        all_encrypted = verify_head_encryption(
-            self._original_path,
-            self._rewritten_path,
-            pairs_to_check,
-            self._matcher,
-            self._crypto,
-        )
-
         return VerifyResult(
             passed=len(all_errors) == 0,
             commits_verified=commits_checked,
             commits_total=commits_total,
             files_verified=total_files,
-            encrypted_files=tuple(all_encrypted),
+            encrypted_files=(),
             errors=tuple(all_errors),
             encrypted_files_count=preflight.encrypted_files_count,
             identities_verified=preflight.identities_verified,
@@ -206,6 +197,7 @@ class RewriteVerifier:
                 rew_sha,
             )
             all_errors.extend(errs)
+            total_files += len(get_file_list(self._original_path, orig_sha))
             commits_checked += 1
             if all_errors:
                 break

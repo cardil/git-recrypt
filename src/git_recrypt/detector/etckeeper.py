@@ -69,6 +69,8 @@ _PASSWORD_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)(password|passwd|secret|credential)\s*[=:]\s*\S+",
 )
 
+_GIT_DIR_PREFIX_LEN: Final = len(".git")
+
 
 def _build_spec(patterns: tuple[str, ...]) -> GitIgnoreSpec:
     return GitIgnoreSpec.from_lines(patterns)
@@ -118,6 +120,12 @@ class EtcKeeperDetector(BaseDetector):
             if not file.is_file():
                 continue
             rel = _rel(repo_path, file)
+            git_boundary = (
+                len(rel) == _GIT_DIR_PREFIX_LEN
+                or rel[_GIT_DIR_PREFIX_LEN] in ("/", "\\")
+            )
+            if rel.startswith(".git") and git_boundary:
+                continue
 
             critical_glob = _match_pattern(rel, ETCKEEPER_CRITICAL)
             if critical_glob is not None:
@@ -140,6 +148,7 @@ class EtcKeeperDetector(BaseDetector):
                         suggested_pattern=suspicious_glob,
                     )
                 )
+                suggested_set.add(suspicious_glob)
 
         return DetectionResult(
             profile="etckeeper",

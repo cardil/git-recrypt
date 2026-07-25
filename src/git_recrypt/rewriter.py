@@ -35,7 +35,15 @@ if TYPE_CHECKING:
 
     from git_recrypt.manifest import Manifest
 
-_GIT: Final = "/usr/bin/git"
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 
 
 def _git_config(repo: Path, key: str, value: str) -> None:
@@ -193,7 +201,7 @@ class HistoryRewriter:
             _ = shutil.copy2(self._config.key_file, keys_dir / "default")
         is_gpg = gpg_cfg is not None and gpg_cfg.user_ids is not None
         self._emit(f"Committing .gitattributes ({len(m.patterns)} patterns)")
-        ga_content = generate_gitattributes(m.patterns)
+        ga_content = generate_gitattributes(m.patterns, exclude=m.exclude)
         _ = (t / ".gitattributes").write_text(ga_content, encoding="utf-8")
         _ = _run(["add", ".gitattributes"], t)
         _ = _run(["commit", "-m", "git-recrypt: add .gitattributes"], t)
@@ -245,37 +253,55 @@ class HistoryRewriter:
         is_root: bool,
     ) -> None:
         if len(meta.parents) > 1:
-            self._replay_merge_commit(tgt, meta)
+            self._replay_merge_commit(sha, src, tgt, meta)
             return
+        if not is_root and meta.parents:
+            mapped_parent = self._sha_map[meta.parents[0]]
+            current_head = _rev_parse(tgt)
+            if current_head != mapped_parent:
+                _ = _run(["checkout", mapped_parent], tgt)
         fmt = ["format-patch", "--stdout", "--binary", "--no-stat"]
         if is_root:
             fmt += ["--root", sha]
         else:
             fmt += ["-1", sha]
-        fmt += ["--", ":!.git-crypt"]
+        fmt += ["--", ":!.git-crypt", ":!.gitattributes"]
         patch = _run(fmt, src)
         if not patch.strip():
+            _ = _run(["add", "-A"], tgt)
+            _commit_with_meta(tgt, meta)
             return
         _dump_debug_patch(src, sha, patch)
         _git_apply(tgt, patch)
         _ = _run(["add", "-A"], tgt)
         _commit_with_meta(tgt, meta)
 
-    def _replay_merge_commit(self, tgt: Path, meta: CommitInfo) -> None:
-        mapped_parents = [self._sha_map[p] for p in meta.parents]
-        _ = _run(["checkout", mapped_parents[0]], tgt)
-        merge_cmd = ["merge", "--no-commit", "--no-ff", mapped_parents[1]]
-        r = subprocess.run(  # noqa: S603
-            [_GIT, *merge_cmd], cwd=tgt, capture_output=True, check=False
-        )
-        if r.returncode not in {0, 1}:
-            raw: bytes = r.stderr or b""
+    def _replay_merge_commit(
+        self, sha: str, src: Path, tgt: Path, meta: CommitInfo,
+    ) -> None:
+        if len(meta.parents) > 2:  # noqa: PLR2004
             raise RewriteError(
                 phase="merge",
-                detail=f"git merge failed: {raw.decode(errors='replace')}",
+                detail=(
+                    f"Octopus merges ({len(meta.parents)} parents) are a planned"
+                    " feature, not yet implemented."
+                ),
             )
+        mapped_parents = [self._sha_map[p] for p in meta.parents]
+        _ = _run(["checkout", mapped_parents[0]], tgt)
+        # Use git diff between first parent and merge commit to reproduce the
+        # original author's resolved tree exactly. format-patch fails on merges
+        # because files already exist after checking out the first parent.
+        diff_cmd = [
+            "diff", "-p", "--binary",
+            meta.parents[0], sha, "--", ":!.git-crypt", ":!.gitattributes",
+        ]
+        patch = _run(diff_cmd, src)
+        if patch.strip():
+            _dump_debug_patch(src, sha, patch)
+            _git_apply(tgt, patch)
         _ = _run(["add", "-A"], tgt)
-        _commit_with_meta(tgt, meta)
+        _commit_merge_with_meta(tgt, meta, mapped_parents)
         _ = _run(["checkout", self._branch], tgt)
         _ = _run(["merge", "--ff-only", "HEAD@{1}"], tgt)
 
@@ -405,14 +431,47 @@ def _commit_with_meta(tgt: Path, meta: CommitInfo) -> None:
         raise RewriteError(phase="commit", detail=f"git commit failed: {stderr}")
 
 
+def _commit_merge_with_meta(
+    tgt: Path, meta: CommitInfo, parents: list[str],
+) -> None:
+    import os  # noqa: PLC0415
+
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": meta.author.name,
+        "GIT_AUTHOR_EMAIL": meta.author.email,
+        "GIT_AUTHOR_DATE": meta.author.date,
+        "GIT_COMMITTER_NAME": meta.committer.name,
+        "GIT_COMMITTER_EMAIL": meta.committer.email,
+        "GIT_COMMITTER_DATE": meta.committer.date,
+    }
+    tree_sha = _run(["write-tree"], tgt).decode().strip()
+    parent_args: list[str] = []
+    for p in parents:
+        parent_args += ["-p", p]
+    cmd = [_GIT, "commit-tree", tree_sha, *parent_args, "-m", meta.message]
+    new_sha = subprocess.run(  # noqa: S603
+        cmd, cwd=tgt, capture_output=True, check=False, env=env,
+    )
+    if new_sha.returncode != 0:
+        raw: bytes = new_sha.stderr or b""
+        stderr = raw.decode(errors="replace")
+        raise RewriteError(phase="commit", detail=f"git commit-tree failed: {stderr}")
+    sha = new_sha.stdout.decode().strip()
+    _ = _run(["update-ref", "HEAD", sha], tgt)
+
+
 def _assert_gpg_keys_available(manifest: Manifest) -> None:
     gpg_cfg = manifest.key.gpg
     if gpg_cfg is None or gpg_cfg.user_ids is None:
         return
-    _GPG = "/usr/bin/gpg"  # noqa: N806
+    _gpg = shutil.which("gpg")
+    if _gpg is None:
+        msg = "gpg not found in PATH"
+        raise RuntimeError(msg)
     for uid in gpg_cfg.user_ids:
         r = subprocess.run(  # noqa: S603
-            [_GPG, "--list-secret-keys", "--with-colons", uid],
+            [_gpg, "--list-secret-keys", "--with-colons", uid],
             capture_output=True, check=False,
         )
         if r.returncode == 0 and r.stdout.strip():

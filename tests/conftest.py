@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -11,8 +12,17 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT = "/usr/bin/git"
-_GIT_CRYPT = "/usr/bin/git-crypt"
+
+def _find_bin(name: str) -> str:
+    path = shutil.which(name)
+    if path is None:
+        msg = f"{name} not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT = _find_bin("git")
+_GIT_CRYPT = _find_bin("git-crypt")
 
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "Test",

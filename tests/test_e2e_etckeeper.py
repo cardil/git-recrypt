@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
@@ -18,7 +19,16 @@ from git_recrypt.verifier import RewriteVerifier, VerifyMode
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT: Final = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 _GIT_ENV: Final[dict[str, str]] = {
     "GIT_AUTHOR_NAME": "Test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -403,9 +413,7 @@ def test_etckeeper_rewrite_and_verify(
         )
         assert ga.returncode == 0, f".gitattributes missing in commit {sha}"
 
-    # Source repo NOT mutated -- HEAD SHA is stable
-    sha_src = _head_sha(etckeeper_repo)
-    assert sha_src == _head_sha(etckeeper_repo)
+    # Source repo NOT mutated -- verified in test_source_repo_not_mutated
 
     # Encrypted files at HEAD (pki/nssdb/key4.db deleted in commit 16, not present)
     encrypted_at_head = [

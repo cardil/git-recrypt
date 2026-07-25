@@ -157,14 +157,18 @@ class GenericDetector(BaseDetector):
         )
 
 
+_BROAD_EXTENSIONS: frozenset[str] = frozenset(
+    {".json", ".yaml", ".yml", ".xml", ".conf", ".cfg", ".ini", ".toml"}
+)
+
+
 def _glob_for(filename: str) -> str:
-    """Return a glob pattern for the given filename."""
     dot = filename.rfind(".")
+    if filename.startswith(".") and dot in {0, -1}:
+        return filename
     if dot > 0:
         ext = filename[dot:]
-        # Named dotfiles like .env stay as-is.
-        if filename.startswith(".") and dot == 0:
-            return filename
+        if ext in _BROAD_EXTENSIONS:
+            return f"**/{filename}"
         return f"**/*{ext}"
-    # No extension -- match by exact name under any directory.
     return f"**/{filename}"

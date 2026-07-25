@@ -1,4 +1,9 @@
-"""State persistence for git-recrypt in ~/.cache/git-recrypt/<repo-hash>/."""
+"""State persistence for git-recrypt in ~/.cache/git-recrypt/<repo-hash>/.
+
+NOTE: Resume from interrupted rewrites is a planned feature, not yet implemented.
+State is currently saved only after successful completion for post-rewrite
+verification and debugging.
+"""
 
 from __future__ import annotations
 
@@ -53,7 +58,10 @@ def load_commit_map_from_state(state_dir: Path) -> dict[str, str]:
     path = state_dir / "commit-map.json"
     if not path.exists():
         return {}
-    parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    except json.JSONDecodeError:
+        return {}
     if not isinstance(parsed, dict):
         return {}
     result: dict[str, str] = {
@@ -77,7 +85,10 @@ def load_setup_commits(state_dir: Path) -> list[str]:
     path = state_dir / "setup-commits.json"
     if not path.exists():
         return []
-    parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    except json.JSONDecodeError:
+        return []
     if not isinstance(parsed, list):
         return []
     return [s for s in parsed if isinstance(s, str)]  # pyright: ignore[reportUnknownVariableType]
@@ -103,7 +114,10 @@ def load_config(state_dir: Path) -> StateConfig | None:
     path = state_dir / "config.json"
     if not path.exists():
         return None
-    parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+    except json.JSONDecodeError:
+        return None
     if not isinstance(parsed, dict):
         return None
     try:

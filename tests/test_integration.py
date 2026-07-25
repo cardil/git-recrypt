@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
@@ -15,7 +16,16 @@ from git_recrypt.verifier import RewriteVerifier, VerifyMode, VerifyResult
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT: Final = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 _GIT_ENV: Final[dict[str, str]] = {
     "GIT_AUTHOR_NAME": "Test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -174,11 +184,11 @@ def test_exclude_patterns(sample_key_file: Path, tmp_path: Path) -> None:
 
     manifest = _create_manifest(
         key_file=sample_key_file,
-        patterns=["*.key"],
+        patterns=["*"],
         exclude=["*.pub"],
     )
 
-    # When: rewrite with patterns ["*.key"], exclude=["*.pub"]
+    # When: rewrite with patterns ["*"], exclude=["*.pub"]
     result = _run_rewrite(
         repo_path=repo,
         key_file=sample_key_file,

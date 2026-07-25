@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,25 @@ class PatternMatcher:
 
     include_patterns: tuple[str, ...]
     exclude_patterns: tuple[str, ...]
+    _include_spec: pathspec.PathSpec = dataclasses.field(  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        init=False, repr=False, compare=False
+    )
+    _exclude_spec: pathspec.PathSpec = dataclasses.field(  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        """Compile PathSpec objects once for reuse in matches()."""
+        object.__setattr__(
+            self,
+            "_include_spec",
+            pathspec.PathSpec.from_lines("gitignore", self.include_patterns),
+        )
+        object.__setattr__(
+            self,
+            "_exclude_spec",
+            pathspec.PathSpec.from_lines("gitignore", self.exclude_patterns),
+        )
 
     def matches(self, filepath: str) -> bool:
         """Return True if filepath matches include patterns and not exclude patterns.
@@ -29,11 +49,11 @@ class PatternMatcher:
         Returns:
             True if the path is included and not excluded.
         """
-        include_spec = pathspec.PathSpec.from_lines("gitignore", self.include_patterns)
-        exclude_spec = pathspec.PathSpec.from_lines("gitignore", self.exclude_patterns)
-        included = include_spec.match_file(filepath)
-        excluded = exclude_spec.match_file(filepath)
-        return included and not excluded
+        included = self._include_spec.match_file(filepath)  # pyright: ignore[reportUnknownMemberType]
+        excluded = (
+            self._exclude_spec.match_file(filepath) if self.exclude_patterns else False  # pyright: ignore[reportUnknownMemberType]
+        )
+        return bool(included and not excluded)
 
     def matches_bytes(self, filepath: bytes) -> bool:
         """Match against a bytes filepath (git-filter-repo uses bytes).
@@ -62,20 +82,33 @@ class PatternMatcher:
 def generate_gitattributes(
     patterns: Sequence[str],
     named_patterns: Mapping[str, Sequence[str]] | None = None,
+    exclude: Sequence[str] = (),
 ) -> str:
     """Generate .gitattributes content from pattern list.
 
     Each pattern becomes: <pattern> filter=git-crypt diff=git-crypt
     Named patterns use: <pattern> filter=git-crypt-<name> diff=git-crypt-<name>
+    Exclude patterns become: <pattern> !filter !diff
     Always appends: .gitattributes !filter !diff
 
     Args:
         patterns: Sequence of glob patterns for the default git-crypt key.
         named_patterns: Optional mapping of key name to patterns for named keys.
+        exclude: Sequence of patterns to exclude from encryption.
 
     Returns:
         String content suitable for writing to .gitattributes.
+
+    Raises:
+        ValueError: If any pattern ends with '/' (directory-style not supported).
     """
+    for p in patterns:
+        if p.endswith("/"):
+            msg = (
+                f"Pattern '{p}' ends with '/'. Directory-style patterns are not"
+                f" supported by gitattributes. Use '{p}**' or '{p}*' instead."
+            )
+            raise ValueError(msg)
     lines: list[str] = [
         f"{pattern} filter=git-crypt diff=git-crypt" for pattern in patterns
     ]
@@ -86,6 +119,8 @@ def generate_gitattributes(
                 f"{pattern} filter=git-crypt-{name} diff=git-crypt-{name}"
                 for pattern in name_pats
             )
+
+    lines.extend(f"{pattern} !filter !diff" for pattern in exclude)
 
     lines.append(".gitattributes !filter !diff")
     return "\n".join(lines) + "\n"

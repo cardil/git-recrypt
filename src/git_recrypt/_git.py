@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
@@ -10,9 +11,26 @@ from git_recrypt.errors import CryptoError
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT: Final = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+def _find_gpg() -> str:
+    path = shutil.which("gpg")
+    if path is None:
+        msg = "gpg not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 _GIT_CRYPT: Final = "git-crypt"
-_GPG: Final = "gpg"
+_GPG: Final = _find_gpg()
 
 
 def get_commit_list(repo_path: Path) -> list[str]:

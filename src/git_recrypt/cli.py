@@ -83,7 +83,7 @@ def _run_wizard(repo: Path, output: Path) -> None:
         from git_recrypt import wizard as _wizard_mod  # noqa: PLC0415
     except ImportError as exc:
         _console.print(
-            "[red]Wizard not available. Install optional dependencies.[/red]"
+            "[red]Wizard dependencies not available. Check your environment.[/red]"
         )
         raise typer.Exit(code=1) from exc
     _ = _wizard_mod.run_wizard(repo, output)
@@ -178,12 +178,18 @@ def run(
 def _finalize_target(work_dir: Path, branch: str) -> None:
     if not (work_dir / ".git").is_dir():
         return
+    import shutil  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
 
-    _ = subprocess.run(  # noqa: S603
-        ["/usr/bin/git", "checkout", branch],
+    git = shutil.which("git")
+    if git is None:
+        return
+    r = subprocess.run(  # noqa: S603
+        [git, "checkout", branch],
         cwd=work_dir, capture_output=True, check=False,
     )
+    if r.returncode != 0:
+        _console.print(f"[yellow]Warning: could not checkout branch {branch}[/yellow]")
 
 
 @app.command()

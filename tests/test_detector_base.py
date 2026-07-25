@@ -64,6 +64,24 @@ def test_base_detector_not_instantiable() -> None:
         BaseDetector()  # type: ignore[abstract]  # pyright: ignore[reportAbstractUsage]
 
 
+def test_detected_secret_equal_instances_deduplicate() -> None:
+    s1 = DetectedSecret(
+        filepath="/etc/shadow",
+        severity=Severity.CRITICAL,
+        reason="Shadow password file",
+        suggested_pattern="etc/shadow",
+    )
+    s2 = DetectedSecret(
+        filepath="/etc/shadow",
+        severity=Severity.CRITICAL,
+        reason="Shadow password file",
+        suggested_pattern="etc/shadow",
+    )
+    assert s1 == s2
+    assert hash(s1) == hash(s2)
+    assert len({s1, s2}) == 1
+
+
 def test_detection_result_creation() -> None:
     secret = DetectedSecret(
         filepath="/etc/shadow",

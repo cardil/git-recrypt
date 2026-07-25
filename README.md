@@ -226,7 +226,7 @@ The rewrite happens entirely in a fresh target repo. The source repo is never mo
    - Stage everything with `git add -A`. The git-crypt clean filter encrypts matched files at this point.
    - Commit with the original author, date, and message.
 
-Rewrite state (commit map, config, setup commits) is persisted to `~/.cache/git-recrypt/<repo-hash>/` so interrupted runs can resume.
+Rewrite state (commit map, config, setup commits) is persisted to `~/.cache/git-recrypt/<repo-hash>/` for post-rewrite verification and debugging. Resume from interrupted rewrites is a planned feature, not yet implemented.
 
 ---
 
@@ -265,3 +265,16 @@ GIT_RECRYPT_DEBUG=1 git-recrypt run --manifest git-recrypt.yaml
 - Only branches listed in the manifest are rewritten. Tags are not rewritten.
 - The rewrite produces a new repo with a different object graph. You'll need to force-push or replace the remote.
 - GPG mode requires that all listed user IDs have public keys available in your local keyring before running.
+
+---
+
+## Planned features
+
+The following features are not yet implemented but are on the roadmap:
+
+- `introduce_at: first-match` and SHA-based introduction points. Currently only `root` is fully supported.
+- Multi-branch rewriting. The `branches` list accepts multiple entries in the manifest schema, but rewriting more than one branch is not yet implemented.
+- Octopus merge support. Merges with more than 2 parents are not handled.
+- Named encryption keys (`named_patterns`). Per-pattern key selection is not yet supported.
+- Resume interrupted rewrites. State is persisted after a successful run, but resuming a partially completed rewrite is not yet implemented.
+- Per-GPG-identity verification. The verify command currently checks content correctness but does not validate per-recipient decryptability.

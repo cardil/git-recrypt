@@ -34,7 +34,12 @@ _PROFILE_YAML_THRESHOLD = 5
 
 
 def _is_secret_yaml(content: str) -> bool:
-    return bool(K8S_SECRET_PATTERNS["kind_secret"].search(content))
+    patterns = K8S_SECRET_PATTERNS
+    return bool(
+        patterns["kind_secret"].search(content)
+        or patterns["type_opaque"].search(content)
+        or patterns["string_data"].search(content)
+    )
 
 
 def _matches_path_pattern(rel: str) -> bool:
@@ -51,10 +56,11 @@ def _matches_path_pattern(rel: str) -> bool:
 
 
 def _secret_yaml_pattern(rel: str) -> str:
+    ext = Path(rel).suffix  # .yaml or .yml
     parent = Path(rel).parent
     if parent == Path():
-        return "*.yaml"
-    return str(parent / "*.yaml")
+        return f"*{ext}"
+    return str(parent / f"*{ext}")
 
 
 def _path_match_pattern(rel: str) -> str:

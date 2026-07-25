@@ -80,6 +80,13 @@ class Manifest(BaseModel):
     detection_profile: Literal["generic", "etckeeper", "kubernetes"] | None = None
 
     @model_validator(mode="after")
+    def _validate_named_patterns_not_supported(self) -> Manifest:
+        if self.named_patterns is not None:
+            msg = "'named_patterns' is a planned feature, not yet implemented"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _validate_patterns_nonempty(self) -> Manifest:
         if not self.patterns:
             msg = "'patterns' must contain at least one entry"

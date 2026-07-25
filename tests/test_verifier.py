@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
@@ -13,7 +14,16 @@ from git_recrypt.verifier import RewriteVerifier, VerifyMode, VerifyResult
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT: Final = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 _GIT_CRYPT: Final = "git-crypt"
 _GIT_ENV: Final[dict[str, str]] = {
     "GIT_AUTHOR_NAME": "Test",

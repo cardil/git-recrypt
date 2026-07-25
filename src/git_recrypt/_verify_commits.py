@@ -96,6 +96,15 @@ def verify_commit_checkout(
                 f"commit {rew_sha[:8]}: {fp}: disk content differs from original"
             )
 
+    orig_file_set = set(orig_files)
+    for fp in rew_files:
+        if fp == ".gitattributes" or fp.startswith(".git-crypt/"):
+            continue
+        if fp not in orig_file_set:
+            errors.append(
+                f"commit {rew_sha[:8]}: unexpected extra file in rewritten tree: {fp}"
+            )
+
     return errors
 
 

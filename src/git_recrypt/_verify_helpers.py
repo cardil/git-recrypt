@@ -35,7 +35,7 @@ def run_preflight(
     rewritten_path: Path,
     matcher: PatternMatcher,
     key_file: Path | None,
-    gpg_user_ids: list[str],
+    gpg_user_ids: list[str],  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
     lock_unlock_shas: list[str] | None = None,
 ) -> PreflightResult:
     """Run preflight phases: git-crypt status + lock/unlock roundtrips.
@@ -70,13 +70,15 @@ def run_preflight(
                 errors=(f"Phase 2 at {sha[:8]}: {error}",),
             )
 
-    is_gpg = key_file is None
-    identities_count = len(gpg_user_ids) if is_gpg else 1
+    # The lock/unlock roundtrip verifies that at least one identity works,
+    # but does not test each identity individually. Report 1 (roundtrip passed)
+    # rather than len(gpg_user_ids) to avoid overclaiming per-identity coverage.
+    identities_verified = 1 if shas else 0
 
     return PreflightResult(
         passed=True,
         encrypted_files_count=status_result.encrypted_files_count,
-        identities_verified=identities_count,
+        identities_verified=identities_verified,
         errors=(),
     )
 
@@ -100,6 +102,22 @@ def _phase_git_crypt_status(
         fp for fp, is_enc in entries if is_enc and matcher.matches(fp)
     ]
     count = len(encrypted_matching)
+
+    unencrypted_matching = [
+        fp for fp, is_enc in entries if not is_enc and matcher.matches(fp)
+    ]
+    if unencrypted_matching:
+        msgs = [f"  {fp}" for fp in unencrypted_matching[:10]]
+        detail = "\n".join(msgs)
+        return PreflightResult(
+            passed=False,
+            encrypted_files_count=count,
+            identities_verified=0,
+            errors=(
+                f"Phase 1: {len(unencrypted_matching)} matched file(s) are NOT"
+                f" encrypted:\n{detail}",
+            ),
+        )
 
     has_patterns = bool(matcher.include_patterns)
     if has_patterns and count == 0:

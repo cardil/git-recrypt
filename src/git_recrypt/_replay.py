@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -12,7 +13,16 @@ from git_recrypt.errors import RewriteError
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GIT: Final = "/usr/bin/git"
+
+def _find_git() -> str:
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+_GIT: Final = _find_git()
 _GIT_CRYPT: Final = "git-crypt"
 _SKIP_MODES: Final[frozenset[str]] = frozenset({"160000", "120000"})
 
@@ -193,7 +203,7 @@ def read_commit_meta(repo: Path, sha: str) -> CommitInfo:
             detail=f"git show failed for {sha}: {_exc_stderr(exc)}",
         ) from exc
 
-    lines = result.stdout.decode(errors="replace").split("\n", 8)
+    lines = result.stdout.decode(errors="replace").split("\n", 7)
     parents_raw = lines[0].strip()
     parents = parents_raw.split() if parents_raw else []
     author = CommitMeta(name=lines[1], email=lines[2], date=lines[3])
