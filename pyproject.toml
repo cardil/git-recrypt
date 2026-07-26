@@ -5,7 +5,7 @@ description = "Retroactively introduce git-crypt to existing repos by rewriting 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "typer[all]>=0.15",
+    "typer>=0.15",
     "rich>=14",
     "pyyaml>=6",
     "questionary>=2",

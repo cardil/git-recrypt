@@ -2,35 +2,23 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
+from git_recrypt._shellout import GIT as _GIT
+from git_recrypt._shellout import find_gpg
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _find_git() -> str:
-    path = shutil.which("git")
-    if path is None:
-        msg = "git not found in PATH"
-        raise RuntimeError(msg)
-    return path
-
-
-def _find_gpg() -> str:
-    path = shutil.which("gpg")
-    if path is None:
-        msg = "gpg not found in PATH"
-        raise RuntimeError(msg)
-    return path
-
-
-_GIT: Final = _find_git()
 _GIT_CRYPT: Final = "git-crypt"
-_GPG: Final = _find_gpg()
+
+
+def _get_gpg() -> str:
+    """Lazy GPG binary resolution -- only called in GPG-specific functions."""
+    return find_gpg()
 
 
 def get_commit_list(repo_path: Path) -> list[str]:
@@ -70,20 +58,21 @@ def get_file_list(repo_path: Path, sha: str) -> list[str]:
         List of file paths relative to repo root.
     """
     result = subprocess.run(  # noqa: S603
-        [_GIT, "ls-tree", "-r", sha],
+        [_GIT, "ls-tree", "-rz", sha],
         cwd=repo_path,
         capture_output=True,
         check=True,
     )
-    output: str = result.stdout.decode().strip()
-    if not output:
+    if not result.stdout:
         return []
     files: list[str] = []
-    for line in output.splitlines():
-        meta, filepath = line.split("\t", 1)
-        mode = meta.split(" ", 1)[0]
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        meta_raw, raw_filepath = record.split(b"\t", 1)
+        mode = meta_raw.split(b" ", 1)[0].decode()
         if mode not in _SKIP_MODES:
-            files.append(filepath)
+            files.append(raw_filepath.decode(errors="surrogateescape"))
     return files
 
 
@@ -257,7 +246,7 @@ def export_gpg_secret_key(user_id: str, output_path: Path) -> None:
         CryptoError: If gpg export fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_GPG, "--export-secret-keys", "--armor", user_id],
+        [_get_gpg(), "--export-secret-keys", "--armor", user_id],
         capture_output=True,
         check=False,
     )
@@ -281,7 +270,7 @@ def import_gpg_key(key_path: Path, gnupghome: Path) -> None:
         CryptoError: If gpg import fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_GPG, "--homedir", str(gnupghome), "--import", str(key_path)],
+        [_get_gpg(), "--homedir", str(gnupghome), "--import", str(key_path)],
         capture_output=True,
         check=False,
     )

@@ -77,27 +77,26 @@ def _clone_and_setup(original: Path, dest: Path) -> None:
     _run([_GIT, "config", "user.name", "Test"], cwd=dest)
 
 
-def _get_head_sha(repo: Path) -> str:
-    """Return the HEAD commit SHA of a repo."""
+def _get_all_shas(repo: Path) -> list[str]:
     result = subprocess.run(  # noqa: S603
-        [_GIT, "rev-parse", "HEAD"],
+        [_GIT, "rev-list", "HEAD", "--reverse"],
         check=True,
         capture_output=True,
         cwd=repo,
     )
-    return result.stdout.decode().strip()
+    return result.stdout.decode().strip().splitlines()
 
 
 def _write_commit_map(original: Path, rewritten: Path) -> None:
-    """Write a commit-map mapping orig->rewritten SHA."""
-    orig_sha = _get_head_sha(original)
-    rew_sha = _get_head_sha(rewritten)
+    """Write a commit-map mapping orig->rewritten SHA (all commits, oldest first)."""
+    orig_shas = _get_all_shas(original)
+    rew_shas = _get_all_shas(rewritten)
     map_dir = rewritten / ".git" / "filter-repo"
     map_dir.mkdir(parents=True, exist_ok=True)
-    (map_dir / "commit-map").write_text(
-        f"old                                      new\n{orig_sha} {rew_sha}\n",
-        encoding="utf-8",
-    )
+    lines = ["old                                      new\n"]
+    for o, r in zip(orig_shas, rew_shas, strict=False):
+        lines.append(f"{o} {r}\n")
+    (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
 
 
 def _make_rewritten_repo(
@@ -158,6 +157,7 @@ def _make_gcrypt_repo_no_encrypted_files(
 
     _run_git_crypt(["unlock", str(key_file)], cwd=dest)
     _run_git_crypt(["lock", "--force"], cwd=dest)
+    _write_commit_map(original, dest)
 
 
 def _make_gcrypt_repo_no_gitattributes(
@@ -404,20 +404,20 @@ def test_verify_result_passed_false_on_errors(
 
 def test_fast_mode_samples_commits(sample_key_file: Path, tmp_path: Path) -> None:
     """Given FAST mode with multi-commit repo, commits_verified <= commits_total."""
-    # Given: build a 3-commit original repo, rewrite only HEAD
     original = tmp_path / "original"
     original.mkdir()
     _run([_GIT, "init"], cwd=original)
     _run([_GIT, "config", "user.email", "test@example.com"], cwd=original)
     _run([_GIT, "config", "user.name", "Test"], cwd=original)
 
+    secrets = original / "secrets"
+    secrets.mkdir()
+    (secrets / "api.key").write_text("API_KEY=secret\n")
     (original / "README.md").write_text("# Test\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 1"], cwd=original)
 
-    secrets = original / "secrets"
-    secrets.mkdir()
-    (secrets / "api.key").write_text("API_KEY=secret\n")
+    (secrets / "api.key").write_text("API_KEY=updated\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 2"], cwd=original)
 

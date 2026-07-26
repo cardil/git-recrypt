@@ -109,6 +109,13 @@ def generate_gitattributes(
                 f" supported by gitattributes. Use '{p}**' or '{p}*' instead."
             )
             raise ValueError(msg)
+    for p in exclude:
+        if p.endswith("/"):
+            msg = (
+                f"Exclude pattern '{p}' ends with '/'. Directory-style patterns are not"
+                f" supported by gitattributes. Use '{p}**' or '{p}*' instead."
+            )
+            raise ValueError(msg)
     lines: list[str] = [
         f"{pattern} filter=git-crypt diff=git-crypt" for pattern in patterns
     ]

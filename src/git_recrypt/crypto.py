@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from git_recrypt._shellout import find_gpg
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
@@ -158,16 +159,6 @@ def setup_gpg_repo(repo_path: Path, user_ids: list[str]) -> Path:
     return export_gpg_key(repo_path)
 
 
-def _find_git() -> str:
-    path = shutil.which("git")
-    if path is None:
-        msg = "git not found in PATH"
-        raise RuntimeError(msg)
-    return path
-
-
-_GIT_BIN: Final = _find_git()
-
 _GPG_ALGO_MAP: Final[dict[str, tuple[str, str, str, str]]] = {
     # algorithm -> (primary_type, primary_extra, sub_type, sub_extra)
     "ed25519": ("EDDSA", "Key-Curve: ed25519", "ECDH", "Subkey-Curve: cv25519"),
@@ -175,26 +166,6 @@ _GPG_ALGO_MAP: Final[dict[str, tuple[str, str, str, str]]] = {
     "rsa2048": ("RSA", "Key-Length: 2048", "RSA", "Subkey-Length: 2048"),
 }
 
-
-def _resolve_gpg_key_via_temp(user_ids: list[str]) -> Path:
-    """Create a fresh temp repo, init git-crypt + add GPG users, export key.
-
-    Never touches the source repo. Creates a minimal git repo in a temp dir,
-    runs git-crypt init + add-gpg-user, then exports the symmetric key.
-    """
-    tmp_dir = tempfile.mkdtemp(prefix="gcri-gpg-setup-")
-    tmp_repo = Path(tmp_dir) / "repo"
-    _ = _run_cmd([_GIT_BIN, "init", str(tmp_repo)])
-    _ = _run_cmd([_GIT_BIN, "-C", str(tmp_repo), "config", "user.name", "git-recrypt"])
-    _ = _run_cmd(
-        [_GIT_BIN, "-C", str(tmp_repo), "config", "user.email", "git-recrypt@localhost"]
-    )
-    _ = _run_cmd(
-        [_GIT_BIN, "commit", "--allow-empty", "-m", "init"],
-        cwd=tmp_repo,
-    )
-    init_gpg_repo(tmp_repo, user_ids)
-    return export_gpg_key(tmp_repo)
 
 
 def generate_gpg_key(
@@ -212,7 +183,10 @@ def generate_gpg_key(
     Returns the user ID string "<name> <email>" of the generated key.
     Raises CryptoError on failure.
     """
-    gpg_bin = shutil.which("gpg") or shutil.which("gpg2")
+    try:
+        gpg_bin: str | None = find_gpg()
+    except RuntimeError:
+        gpg_bin = None
     if gpg_bin is None:
         raise CryptoError(detail="gpg binary not found in PATH")
 
@@ -286,22 +260,14 @@ def resolve_key_from_manifest(
         raise CryptoError(detail="No key configuration found in manifest")
 
     if gpg_cfg.generate is not None:
-        gen = gpg_cfg.generate
-        user_id = generate_gpg_key(
-            name=gen.name,
-            email=gen.email,
-            algorithm=gen.algorithm,
-            expire=gen.expire,
-            passphrase_mode=gen.passphrase,
-        )
-        user_ids = [user_id]
-        msg = f"Generated GPG key: {user_id}"
-    elif gpg_cfg.user_ids is not None:
-        return Path("/dev/null"), None
-    else:
         raise CryptoError(
-            detail="GPG config must specify either 'user_ids' or 'generate'"
+            detail=(
+                "'key.gpg.generate' is not yet implemented."
+                " Use 'key.gpg.user_ids' with pre-existing GPG keys instead."
+            )
         )
-
-    key_path = _resolve_gpg_key_via_temp(user_ids)
-    return key_path, msg
+    if gpg_cfg.user_ids is not None:
+        return Path("/dev/null"), None
+    raise CryptoError(
+        detail="GPG config must specify either 'user_ids' or 'generate'"
+    )

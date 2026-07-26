@@ -173,7 +173,7 @@ def etckeeper_repo(tmp_path: Path) -> Path:  # noqa: PLR0915
     repo = tmp_path / "etckeeper"
     repo.mkdir()
 
-    _run_git(["init"], cwd=repo)
+    _run_git(["init", "-b", "master"], cwd=repo)
     _run_git(["config", "user.email", "test@example.com"], cwd=repo)
     _run_git(["config", "user.name", "Test"], cwd=repo)
 

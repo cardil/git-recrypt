@@ -1,0 +1,33 @@
+"""Shared executable discovery for git, gpg, diff, and git-crypt."""
+
+from __future__ import annotations
+
+import shutil
+from typing import Final
+
+
+def find_git() -> str:
+    """Find git binary in PATH or raise RuntimeError."""
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+def find_gpg() -> str:
+    """Find gpg binary in PATH or raise RuntimeError."""
+    path = shutil.which("gpg") or shutil.which("gpg2")
+    if path is None:
+        msg = "gpg not found in PATH; required for GPG mode"
+        raise RuntimeError(msg)
+    return path
+
+
+def find_diff() -> str | None:
+    """Find diff binary in PATH, or return None."""
+    return shutil.which("diff")
+
+
+GIT: Final[str] = find_git()
+GIT_CRYPT: Final[str] = "git-crypt"

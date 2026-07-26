@@ -53,9 +53,9 @@ def _ask_list(q: questionary.Question, label: str) -> list[str]:
     return raw
 
 
-def step_detect(repo_path: Path) -> DetectionResult:
+def step_detect(repo_path: Path, *, profile: str | None = None) -> DetectionResult:
     """Step 1: Run detection and print results table."""
-    result = run_detection(repo_path)
+    result = run_detection(repo_path, profile)
     table = Table(title=f"Detected secrets (profile: {result.profile})")
     table.add_column("Severity", style="bold")
     table.add_column("File")

@@ -179,7 +179,7 @@ introduce_at: root
 
 
 def test_introduce_at_first_match(tmp_path: Path) -> None:
-    # Given a manifest with introduce_at: first-match
+    # Given a manifest with introduce_at: first-match (not yet implemented)
     yaml_content = """\
 version: 1
 key:
@@ -192,14 +192,14 @@ introduce_at: first-match
     path = _write_yaml(tmp_path, yaml_content)
 
     # When loading the manifest
-    manifest = load_manifest(path)
-
-    # Then introduce_at is accepted
-    assert manifest.introduce_at == "first-match"
+    # Then ManifestError is raised with "not yet implemented" message
+    with pytest.raises(ManifestError, match="not yet implemented"):
+        load_manifest(path)
 
 
 def test_introduce_at_valid_sha(tmp_path: Path) -> None:
     # Given a manifest with a valid 40-char hex SHA as introduce_at
+    # (SHA-based introduction is not yet implemented)
     sha = "a" * 40
     yaml_content = f"""\
 version: 1
@@ -213,10 +213,9 @@ introduce_at: "{sha}"
     path = _write_yaml(tmp_path, yaml_content)
 
     # When loading the manifest
-    manifest = load_manifest(path)
-
-    # Then introduce_at is accepted
-    assert manifest.introduce_at == sha
+    # Then ManifestError is raised with "not yet implemented" message
+    with pytest.raises(ManifestError, match="not yet implemented"):
+        load_manifest(path)
 
 
 def test_introduce_at_invalid(tmp_path: Path) -> None:
@@ -268,7 +267,7 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
                 "symmetric": {"key_file": "generate", "export_to": "./git-crypt.key"}
             },
             "patterns": ["*.key", "secrets/**"],
-            "branches": ["main", "develop"],
+            "branches": ["main"],
             "exclude": ["*.pub"],
         }
     )

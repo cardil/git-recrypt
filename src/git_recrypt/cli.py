@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -112,6 +113,7 @@ def run(
         raise typer.Exit(code=1) from exc
 
     repo_path = resolve_repo_path(m, manifest_path, repo)
+    auto_created = work_dir is None
     resolved_work_dir = (
         Path(work_dir)
         if work_dir is not None
@@ -122,6 +124,7 @@ def run(
         _console.print(f"Repository: {repo_path}")
         _console.print(f"Will rewrite [bold]{len(m.patterns)}[/bold] pattern(s)")
         _console.print(f"Work directory: {resolved_work_dir}")
+        typer.confirm("Proceed with rewrite?", abort=True)
 
     try:
         key_file, key_msg = resolve_key_from_manifest(m.key, repo_path)
@@ -153,6 +156,8 @@ def run(
         result = rewriter.run()
     except GitRecryptError as exc:
         _console.print(f"\n[red]Rewrite failed:[/red] {exc}")
+        if auto_created and resolved_work_dir.exists():
+            shutil.rmtree(resolved_work_dir)
         raise typer.Exit(code=1) from exc
 
     _console.print("\n[green]Rewrite complete![/green]")
@@ -178,14 +183,12 @@ def run(
 def _finalize_target(work_dir: Path, branch: str) -> None:
     if not (work_dir / ".git").is_dir():
         return
-    import shutil  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
 
-    git = shutil.which("git")
-    if git is None:
-        return
+    from git_recrypt._shellout import GIT  # noqa: PLC0415
+
     r = subprocess.run(  # noqa: S603
-        [git, "checkout", branch],
+        [GIT, "checkout", branch],
         cwd=work_dir, capture_output=True, check=False,
     )
     if r.returncode != 0:
@@ -209,6 +212,9 @@ def verify(
         _console.print(f"[red]Manifest error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if mode not in ("fast", "full"):
+        _console.print(f"[red]Invalid mode:[/red] '{mode}'. Must be 'fast' or 'full'.")
+        raise typer.Exit(code=1)
     verify_mode = VerifyMode.FULL if mode == "full" else VerifyMode.FAST
     verifier = build_verifier(
         m,

@@ -122,6 +122,10 @@ class GenericDetector(BaseDetector):
                     )
                     continue
 
+                # Skip non-regular files (symlinks, pipes, sockets, etc.)
+                if abs_path.is_symlink() or not abs_path.is_file():
+                    continue
+
                 # Content sniffing for files that didn't match by path.
                 try:
                     with abs_path.open("rb") as fh:

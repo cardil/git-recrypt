@@ -48,9 +48,10 @@ def is_debug() -> bool:
 def save_commit_map(state_dir: Path, mapping: dict[str, str]) -> None:
     """Write old->new SHA mapping to commit-map.json."""
     state_dir.mkdir(parents=True, exist_ok=True)
-    _ = (state_dir / "commit-map.json").write_text(
-        json.dumps(mapping, indent=2), encoding="utf-8"
-    )
+    state_dir.chmod(0o700)
+    p = state_dir / "commit-map.json"
+    _ = p.write_text(json.dumps(mapping, indent=2), encoding="utf-8")
+    p.chmod(0o600)
 
 
 def load_commit_map_from_state(state_dir: Path) -> dict[str, str]:
@@ -75,9 +76,10 @@ def load_commit_map_from_state(state_dir: Path) -> dict[str, str]:
 def save_setup_commits(state_dir: Path, commits: list[str]) -> None:
     """Write setup commit SHAs to setup-commits.json."""
     state_dir.mkdir(parents=True, exist_ok=True)
-    _ = (state_dir / "setup-commits.json").write_text(
-        json.dumps(commits, indent=2), encoding="utf-8"
-    )
+    state_dir.chmod(0o700)
+    p = state_dir / "setup-commits.json"
+    _ = p.write_text(json.dumps(commits, indent=2), encoding="utf-8")
+    p.chmod(0o600)
 
 
 def load_setup_commits(state_dir: Path) -> list[str]:
@@ -97,6 +99,7 @@ def load_setup_commits(state_dir: Path) -> list[str]:
 def save_config(state_dir: Path, config: StateConfig) -> None:
     """Write StateConfig to config.json."""
     state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.chmod(0o700)
     data = {
         "source_repo": config.source_repo,
         "target_repo": config.target_repo,
@@ -104,9 +107,9 @@ def save_config(state_dir: Path, config: StateConfig) -> None:
         "status": config.status,
         "timestamp": config.timestamp,
     }
-    _ = (state_dir / "config.json").write_text(
-        json.dumps(data, indent=2), encoding="utf-8"
-    )
+    p = state_dir / "config.json"
+    _ = p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    p.chmod(0o600)
 
 
 def load_config(state_dir: Path) -> StateConfig | None:

@@ -83,7 +83,10 @@ class KubernetesDetector(BaseDetector):
         """Return True if repo looks like a Kubernetes repo."""
         if (repo_path / "Chart.yaml").exists():
             return True
-        if (repo_path / "kustomization.yaml").exists():
+        if any(
+            (repo_path / name).exists()
+            for name in ("kustomization.yaml", "kustomization.yml", "Kustomization")
+        ):
             return True
         if (repo_path / "values.yaml").exists():
             yaml_count = sum(1 for _ in repo_path.glob(_YAML_GLOB))

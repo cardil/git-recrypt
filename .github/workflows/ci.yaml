@@ -33,6 +33,10 @@ jobs:
         run: |
           output=$(uv run basedpyright src/ tests/ 2>&1) || true
           echo "$output"
+          if [ -z "$output" ]; then
+            echo "::error::basedpyright produced no output (possible crash)"
+            exit 1
+          fi
           if echo "$output" | grep -qE '^[1-9][0-9]* errors?'; then
             echo "::error::basedpyright found errors"
             exit 1

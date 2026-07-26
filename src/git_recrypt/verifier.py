@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import subprocess
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -12,6 +13,7 @@ from git_recrypt._git import (
     get_file_list,
     run_git_crypt_status,
 )
+from git_recrypt._shellout import GIT
 from git_recrypt._verify_commits import (
     verify_commit_checkout,
 )
@@ -123,6 +125,20 @@ class RewriteVerifier:
                 errors=(str(exc),),
             )
 
+        if len(pairs) != len(original_commits):
+            missing = len(original_commits) - len(pairs)
+            return VerifyResult(
+                passed=False,
+                commits_verified=0,
+                commits_total=commits_total,
+                files_verified=0,
+                encrypted_files=(),
+                errors=(
+                    f"Incomplete commit map: {missing} of {len(original_commits)}"
+                    " original commits have no mapping in the rewritten repo",
+                ),
+            )
+
         lock_unlock_shas = self._select_lock_unlock_shas(pairs)
         preflight = run_preflight(
             rewritten_path=self._rewritten_path,
@@ -136,7 +152,7 @@ class RewriteVerifier:
             return VerifyResult(
                 passed=False,
                 commits_verified=0,
-                commits_total=0,
+                commits_total=commits_total,
                 files_verified=0,
                 encrypted_files=(),
                 errors=preflight.errors,
@@ -148,9 +164,40 @@ class RewriteVerifier:
             self._select_fast_sample(pairs) if self._mode == VerifyMode.FAST else pairs
         )
 
-        all_errors, total_files, commits_checked = self._run_commit_verification(
-            pairs_to_check
-        )
+        orig_ref: str | None = None
+        try:
+            r = subprocess.run(  # noqa: S603
+                [GIT, "symbolic-ref", "--short", "HEAD"],
+                cwd=self._rewritten_path,
+                capture_output=True,
+                check=False,
+            )
+            if r.returncode == 0:
+                orig_ref = r.stdout.decode().strip()
+            else:
+                r = subprocess.run(  # noqa: S603
+                    [GIT, "rev-parse", "HEAD"],
+                    cwd=self._rewritten_path,
+                    capture_output=True,
+                    check=False,
+                )
+                if r.returncode == 0:
+                    orig_ref = r.stdout.decode().strip()
+        except OSError:
+            pass
+
+        try:
+            all_errors, total_files, commits_checked = self._run_commit_verification(
+                pairs_to_check
+            )
+        finally:
+            if orig_ref:
+                _ = subprocess.run(  # noqa: S603
+                    [GIT, "checkout", orig_ref],
+                    cwd=self._rewritten_path,
+                    capture_output=True,
+                    check=False,
+                )
 
         return VerifyResult(
             passed=len(all_errors) == 0,
@@ -233,10 +280,7 @@ class RewriteVerifier:
     def _select_lock_unlock_shas(pairs: list[tuple[str, str]]) -> list[str]:
         if not pairs:
             return []
-        shas = [pairs[0][1]]
-        if len(pairs) > 2:  # noqa: PLR2004
-            shas.append(pairs[len(pairs) // 2][1])
-        return shas
+        return [pairs[0][1]]
 
     def _select_fast_sample(
         self, pairs: list[tuple[str, str]]

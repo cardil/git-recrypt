@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
-from typing import TYPE_CHECKING, Final, override
+from pathlib import Path
+from typing import Final, override
 
 from pathspec import GitIgnoreSpec
 
@@ -13,9 +15,6 @@ from git_recrypt.detector.base import (
     DetectionResult,
     Severity,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 ETCKEEPER_CRITICAL: Final[tuple[str, ...]] = (
     "shadow",
@@ -64,12 +63,9 @@ ETCKEEPER_SUSPICIOUS: Final[tuple[str, ...]] = (
     "sasl2/*.conf",
 )
 
-# Matches lines like: password = ..., passwd=..., secret:..., etc.
 _PASSWORD_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)(password|passwd|secret|credential)\s*[=:]\s*\S+",
 )
-
-_GIT_DIR_PREFIX_LEN: Final = len(".git")
 
 
 def _build_spec(patterns: tuple[str, ...]) -> GitIgnoreSpec:
@@ -116,39 +112,34 @@ class EtcKeeperDetector(BaseDetector):
         secrets: list[DetectedSecret] = []
         suggested_set: set[str] = set()
 
-        for file in repo_path.rglob("*"):
-            if not file.is_file():
-                continue
-            rel = _rel(repo_path, file)
-            git_boundary = (
-                len(rel) == _GIT_DIR_PREFIX_LEN
-                or rel[_GIT_DIR_PREFIX_LEN] in ("/", "\\")
-            )
-            if rel.startswith(".git") and git_boundary:
-                continue
+        for dirpath, dirnames, filenames in os.walk(repo_path):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for filename in filenames:
+                file = Path(dirpath) / filename
+                rel = _rel(repo_path, file)
 
-            critical_glob = _match_pattern(rel, ETCKEEPER_CRITICAL)
-            if critical_glob is not None:
-                secrets.append(
-                    DetectedSecret(
-                        filepath=rel,
-                        severity=Severity.CRITICAL,
-                        reason="Critical etckeeper secret file",
-                        suggested_pattern=critical_glob,
+                critical_glob = _match_pattern(rel, ETCKEEPER_CRITICAL)
+                if critical_glob is not None:
+                    secrets.append(
+                        DetectedSecret(
+                            filepath=rel,
+                            severity=Severity.CRITICAL,
+                            reason="Critical etckeeper secret file",
+                            suggested_pattern=critical_glob,
+                        )
                     )
-                )
-                suggested_set.add(critical_glob)
-            elif suspicious_spec.match_file(rel) and _has_password_content(file):
-                suspicious_glob = _match_pattern(rel, ETCKEEPER_SUSPICIOUS) or rel
-                secrets.append(
-                    DetectedSecret(
-                        filepath=rel,
-                        severity=Severity.HIGH,
-                        reason="Suspicious config file containing password field",
-                        suggested_pattern=suspicious_glob,
+                    suggested_set.add(critical_glob)
+                elif suspicious_spec.match_file(rel) and _has_password_content(file):
+                    suspicious_glob = _match_pattern(rel, ETCKEEPER_SUSPICIOUS) or rel
+                    secrets.append(
+                        DetectedSecret(
+                            filepath=rel,
+                            severity=Severity.HIGH,
+                            reason="Suspicious config file containing password field",
+                            suggested_pattern=suspicious_glob,
+                        )
                     )
-                )
-                suggested_set.add(suspicious_glob)
+                    suggested_set.add(suspicious_glob)
 
         return DetectionResult(
             profile="etckeeper",

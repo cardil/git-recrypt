@@ -15,7 +15,7 @@ from git_recrypt.errors import ManifestError
 class SymmetricKeyConfig(BaseModel):
     """Symmetric key configuration."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     key_file: str  # Path to existing key, or "generate"
     export_to: str = "./git-crypt.key"
@@ -24,7 +24,7 @@ class SymmetricKeyConfig(BaseModel):
 class GpgGenerateConfig(BaseModel):
     """GPG key generation configuration."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     name: str = "git-recrypt"
     email: str = "git-crypt@localhost"
@@ -36,16 +36,26 @@ class GpgGenerateConfig(BaseModel):
 class GpgKeyConfig(BaseModel):
     """GPG key configuration."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     user_ids: list[str] | None = None
     generate: GpgGenerateConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_gpg_mode(self) -> GpgKeyConfig:
+        if self.user_ids is not None and self.generate is not None:
+            msg = "Exactly one of 'user_ids' or 'generate' must be specified, not both"
+            raise ValueError(msg)
+        if self.user_ids is not None and len(self.user_ids) == 0:
+            msg = "'user_ids' must not be empty; provide at least one GPG user ID"
+            raise ValueError(msg)
+        return self
 
 
 class KeyConfig(BaseModel):
     """Key configuration -- exactly one of symmetric or gpg."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     symmetric: SymmetricKeyConfig | None = None
     gpg: GpgKeyConfig | None = None
@@ -67,7 +77,7 @@ _VALID_INTRODUCE_AT = frozenset({"root", "first-match"})
 class Manifest(BaseModel):
     """git-recrypt manifest -- the single input to the rewrite operation."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     version: Literal[1]
     key: KeyConfig
@@ -96,10 +106,27 @@ class Manifest(BaseModel):
     @model_validator(mode="after")
     def _validate_introduce_at(self) -> Manifest:
         val = self.introduce_at
-        if val not in _VALID_INTRODUCE_AT and not _SHA_PATTERN.match(val):
+        if val != "root":
+            if val == "first-match" or _SHA_PATTERN.match(val):
+                msg = (
+                    f"'introduce_at: {val}' is not yet implemented."
+                    " Only 'root' is currently supported."
+                )
+            else:
+                msg = (
+                    f"'introduce_at' must be 'root', got: {val}."
+                    " 'first-match' and SHA-based introduction points"
+                    " are planned but not yet implemented."
+                )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_single_branch(self) -> Manifest:
+        if len(self.branches) > 1:
             msg = (
-                f"'introduce_at' must be 'root', 'first-match', or a 40-char hex SHA,"
-                f" got: {val}"
+                "Multi-branch rewriting is not yet implemented."
+                " Only a single branch is currently supported."
             )
             raise ValueError(msg)
         return self

@@ -65,7 +65,7 @@ The manifest is a YAML file (default name: `git-recrypt.yaml`) that describes ho
 | `key` | yes | -- | Exactly one of `symmetric` or `gpg` (see below) |
 | `patterns` | yes | -- | List of gitattributes-style glob patterns for files to encrypt. At least one entry required. |
 | `repo` | no | `"./"` | Path to source repository. Relative paths are resolved against the manifest's parent directory. |
-| `introduce_at` | no | `"root"` | Where to introduce encryption: `"root"` (from first commit), `"first-match"` (from first commit touching a matched file), or a 40-char hex SHA. |
+| `introduce_at` | no | `"root"` | Where to introduce encryption. Currently only `"root"` (from first commit) is supported. `"first-match"` and SHA-based introduction points are accepted by the schema but not yet implemented. |
 | `branches` | no | `["HEAD"]` | Branches to rewrite. `HEAD` resolves to the source repo's current branch via `git symbolic-ref`. Fails fast if unresolvable. |
 | `exclude` | no | `[]` | Patterns to exclude from encryption. |
 | `detection_profile` | no | -- | Hint for the `detect` command. Values: `"generic"`, `"etckeeper"`, `"kubernetes"`. |

@@ -2,39 +2,20 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from git_recrypt._shellout import GIT as _GIT
+from git_recrypt._shellout import GIT_CRYPT as _GIT_CRYPT
 from git_recrypt.errors import RewriteError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _find_git() -> str:
-    path = shutil.which("git")
-    if path is None:
-        msg = "git not found in PATH"
-        raise RuntimeError(msg)
-    return path
-
-
-_GIT: Final = _find_git()
-_GIT_CRYPT: Final = "git-crypt"
 _SKIP_MODES: Final[frozenset[str]] = frozenset({"160000", "120000"})
-
-
-@dataclass(frozen=True, slots=True)
-class TreeEntry:
-    """A single entry in a git tree."""
-
-    mode: str
-    type: str  # "blob" or "tree"
-    sha: str
-    path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,46 +70,6 @@ def git_hash_object(repo: Path, content: bytes) -> str:
         raise RewriteError(
             phase="hash-object",
             detail=f"git hash-object failed: {_exc_stderr(exc)}",
-        ) from exc
-    return result.stdout.decode().strip()
-
-
-def git_mktree(repo: Path, entries: list[TreeEntry]) -> str:
-    """Build a hierarchical tree object from entries, return root tree SHA.
-
-    Handles nested paths (e.g. secrets/api.key) by building subtrees
-    recursively then composing them into the root tree.
-    """
-    top: dict[str, TreeEntry] = {}
-    subdirs: dict[str, list[TreeEntry]] = {}
-
-    for e in entries:
-        if "/" in e.path:
-            first, rest = e.path.split("/", 1)
-            subdirs.setdefault(first, []).append(
-                TreeEntry(mode=e.mode, type=e.type, sha=e.sha, path=rest)
-            )
-        else:
-            top[e.path] = e
-
-    for dirname, sub_entries in subdirs.items():
-        sub_sha = git_mktree(repo, sub_entries)
-        top[dirname] = TreeEntry(mode="040000", type="tree", sha=sub_sha, path=dirname)
-
-    flat = sorted(top.values(), key=lambda x: x.path)
-    lines = "".join(f"{e.mode} {e.type} {e.sha}\t{e.path}\n" for e in flat)
-    try:
-        result = subprocess.run(  # noqa: S603
-            [_GIT, "mktree"],
-            input=lines.encode(),
-            capture_output=True,
-            check=True,
-            cwd=repo,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise RewriteError(
-            phase="mktree",
-            detail=f"git mktree failed: {_exc_stderr(exc)}",
         ) from exc
     return result.stdout.decode().strip()
 
@@ -214,11 +155,11 @@ def read_commit_meta(repo: Path, sha: str) -> CommitInfo:
     )
 
 
-def list_commits_topo(repo: Path) -> list[str]:
-    """Return all commits oldest-first in topological order."""
+def list_commits_topo(repo: Path, branch: str = "HEAD") -> list[str]:
+    """Return all commits oldest-first in topological order for the given branch."""
     try:
         result = subprocess.run(  # noqa: S603
-            [_GIT, "rev-list", "--reverse", "--topo-order", "--all"],
+            [_GIT, "rev-list", "--reverse", "--topo-order", branch],
             capture_output=True,
             check=True,
             cwd=repo,
@@ -298,6 +239,11 @@ def run_git_crypt(repo: Path, args: list[str]) -> None:
             capture_output=True,
             check=True,
         )
+    except FileNotFoundError:
+        raise RewriteError(
+            phase="git-crypt",
+            detail="git-crypt not found in PATH. Install it first.",
+        ) from None
     except subprocess.CalledProcessError as exc:
         raise RewriteError(
             phase="git-crypt",

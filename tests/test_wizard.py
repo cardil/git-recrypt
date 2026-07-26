@@ -420,11 +420,12 @@ def test_conflict_different_path(tmp_path: Path, mock_detection: MagicMock) -> N
 
 
 def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> None:
-    # Given: user selects "specific SHA" and provides a valid SHA
+    # Given: user selects "specific SHA" and provides a valid SHA (not yet implemented)
     output = tmp_path / "manifest.yaml"
 
     # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, sha_value, exclusion_stop
+    # Then: validation raises because SHA-based introduction is not yet implemented
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
@@ -441,11 +442,9 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch("questionary.text", side_effect=_iter_text(["", _SHA, ""])),
+        pytest.raises(Exception, match="not yet implemented"),
     ):
-        manifest = run_wizard(tmp_path, output)
-
-    # Then
-    assert manifest.introduce_at == _SHA
+        run_wizard(tmp_path, output)
 
 
 # ---------------------------------------------------------------------------
@@ -455,11 +454,12 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
 
 
 def test_specific_branch_selection(tmp_path: Path, mock_detection: MagicMock) -> None:
-    # Given: user selects "specific" branches and provides branch names
+    # Given: user selects "specific" branches and provides multiple branch names
     output = tmp_path / "manifest.yaml"
 
     # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, branch_names, exclusion_stop
+    # Then: multi-branch is not yet implemented, validation raises
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
@@ -470,12 +470,9 @@ def test_specific_branch_selection(tmp_path: Path, mock_detection: MagicMock) ->
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch("questionary.text", side_effect=_iter_text(["", "main, develop", ""])),
+        pytest.raises(Exception, match="not yet implemented"),
     ):
-        manifest = run_wizard(tmp_path, output)
-
-    # Then
-    assert "main" in manifest.branches
-    assert "develop" in manifest.branches
+        run_wizard(tmp_path, output)
 
 
 # ---------------------------------------------------------------------------
@@ -669,11 +666,12 @@ def test_all_branches_selection(tmp_path: Path, mock_detection: MagicMock) -> No
 def test_first_match_introduction_point(
     tmp_path: Path, mock_detection: MagicMock
 ) -> None:
-    # Given: user selects "first-match" introduction point
+    # Given: user selects "first-match" introduction point (not yet implemented)
     output = tmp_path / "manifest.yaml"
 
     # select order: profile, key_type, sym_mode, introduce_at, branches
     # text order: custom_pattern_stop, exclusion_stop
+    # Then: validation raises because first-match is not yet implemented
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
@@ -690,8 +688,6 @@ def test_first_match_introduction_point(
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch("questionary.text", return_value=_make_question("")),
+        pytest.raises(Exception, match="not yet implemented"),
     ):
-        manifest = run_wizard(tmp_path, output)
-
-    # Then
-    assert manifest.introduce_at == "first-match"
+        run_wizard(tmp_path, output)

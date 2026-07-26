@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from git_recrypt._replay import (
     CommitInfo,
@@ -17,6 +17,8 @@ from git_recrypt._replay import (
     read_commit_meta,
     run_git_crypt,
 )
+from git_recrypt._shellout import GIT as _GIT
+from git_recrypt._shellout import find_gpg
 from git_recrypt._state import (
     StateConfig,
     save_commit_map,
@@ -34,16 +36,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from git_recrypt.manifest import Manifest
-
-def _find_git() -> str:
-    path = shutil.which("git")
-    if path is None:
-        msg = "git not found in PATH"
-        raise RuntimeError(msg)
-    return path
-
-
-_GIT: Final = _find_git()
 
 
 def _git_config(repo: Path, key: str, value: str) -> None:
@@ -225,7 +217,7 @@ class HistoryRewriter:
             msg = f"Source repo not found: {src}"
             raise RewriteError(phase="replay", detail=msg)
         tgt = self._config.work_dir
-        commits = list_commits_topo(src)
+        commits = list_commits_topo(src, branch=self._branch)
         total = len(commits)
         for i, old_sha in enumerate(commits):
             meta = read_commit_meta(src, old_sha)
@@ -333,7 +325,10 @@ def _dump_debug_patch(src: Path, sha: str, patch: bytes) -> None:
         return
     dbg = debug_dir_for_repo(src)
     dbg.mkdir(parents=True, exist_ok=True)
-    _ = (dbg / f"{sha}.patch").write_bytes(patch)
+    dbg.chmod(0o700)
+    p = dbg / f"{sha}.patch"
+    _ = p.write_bytes(patch)
+    p.chmod(0o600)
 
 
 def _preflight_lock_unlock(tgt: Path, key_file: Path, is_gpg: bool) -> None:
@@ -351,22 +346,30 @@ def _preflight_lock_unlock(tgt: Path, key_file: Path, is_gpg: bool) -> None:
 
 
 def _copy_remotes(src: Path, tgt: Path) -> None:
-    if not src.exists():
-        return
+    """Copy remote definitions from source to target repo."""
     try:
         raw = _run(["remote", "-v"], src)
     except RewriteError:
         return
-    seen: set[tuple[str, str]] = set()
+    remotes: dict[str, dict[str, str]] = {}
     for line in raw.decode(errors="replace").splitlines():
         parts = line.split()
-        if len(parts) < 2:  # noqa: PLR2004
+        if len(parts) < 3:  # noqa: PLR2004
             continue
         name, url = parts[0], parts[1]
-        if (name, url) in seen:
+        kind = parts[2].strip("()")
+        if name not in remotes:
+            remotes[name] = {}
+        remotes[name][kind] = url
+    for name, urls in remotes.items():
+        fetch_url = urls.get("fetch", "")
+        push_url = urls.get("push", "")
+        if not fetch_url and not push_url:
             continue
-        seen.add((name, url))
-        _ = _run(["remote", "add", name, url], tgt)
+        primary = fetch_url or push_url
+        _ = _run(["remote", "add", name, primary], tgt)
+        if push_url and push_url != primary:
+            _ = _run(["remote", "set-url", "--push", name, push_url], tgt)
 
 
 def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:
@@ -465,7 +468,10 @@ def _assert_gpg_keys_available(manifest: Manifest) -> None:
     gpg_cfg = manifest.key.gpg
     if gpg_cfg is None or gpg_cfg.user_ids is None:
         return
-    _gpg = shutil.which("gpg")
+    try:
+        _gpg: str | None = find_gpg()
+    except RuntimeError:
+        _gpg = None
     if _gpg is None:
         msg = "gpg not found in PATH"
         raise RuntimeError(msg)

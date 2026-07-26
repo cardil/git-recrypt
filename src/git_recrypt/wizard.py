@@ -29,7 +29,7 @@ def run_wizard(repo_path: Path, output_path: Path) -> Manifest:
 
     profile = step_profile(detection.profile)
     if profile != detection.profile:
-        detection = step_detect(repo_path)
+        detection = step_detect(repo_path, profile=profile)
 
     patterns = step_patterns(detection)
     key = step_key()
@@ -53,7 +53,7 @@ def run_wizard(repo_path: Path, output_path: Path) -> Manifest:
         "exclude": exclude,
         "detection_profile": profile,
     }
-    repo_str = str(repo_path)
+    repo_str = str(repo_path.resolve())
     if repo_str != _DEFAULT_REPO:
         manifest_data["repo"] = repo_str
 
