@@ -140,7 +140,6 @@ def _step_symmetric_key() -> KeyConfig:
 
 
 def _step_gpg_key() -> KeyConfig:
-    """Step 4b: GPG key sub-flow."""
     raw_ids = _ask_str(
         questionary.text(
             "GPG user IDs (comma-separated, empty to generate):", default=""
@@ -150,6 +149,10 @@ def _step_gpg_key() -> KeyConfig:
     if raw_ids.strip():
         user_ids = [uid.strip() for uid in raw_ids.split(",") if uid.strip()]
         return KeyConfig(gpg=GpgKeyConfig(user_ids=user_ids))
+    _console.print(
+        "[yellow]Warning: GPG key generation is not yet implemented."
+        " The manifest will be created but 'run' will fail.[/yellow]"
+    )
     passphrase_mode = _ask_str(
         questionary.select(
             "Passphrase mode for generated GPG key:",

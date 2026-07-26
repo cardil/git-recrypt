@@ -116,6 +116,8 @@ class EtcKeeperDetector(BaseDetector):
             dirnames[:] = [d for d in dirnames if d != ".git"]
             for filename in filenames:
                 file = Path(dirpath) / filename
+                if not file.is_file() or file.is_symlink():
+                    continue
                 rel = _rel(repo_path, file)
 
                 critical_glob = _match_pattern(rel, ETCKEEPER_CRITICAL)

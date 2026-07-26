@@ -31,6 +31,17 @@ if TYPE_CHECKING:
     from git_recrypt.patterns import PatternMatcher
 
 
+def _has_gitattributes(rewritten_path: Path, sha: str) -> bool:
+    """Return True if .gitattributes exists in the tree at the given SHA."""
+    result = subprocess.run(  # noqa: S603
+        [GIT, "ls-tree", "--name-only", sha, ".gitattributes"],
+        cwd=rewritten_path,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 class VerifyMode(StrEnum):
     """Verification thoroughness."""
 
@@ -139,30 +150,7 @@ class RewriteVerifier:
                 ),
             )
 
-        lock_unlock_shas = self._select_lock_unlock_shas(pairs)
-        preflight = run_preflight(
-            rewritten_path=self._rewritten_path,
-            matcher=self._matcher,
-            key_file=preflight_key,
-            gpg_user_ids=self._gpg_user_ids,
-            lock_unlock_shas=lock_unlock_shas,
-        )
-
-        if not preflight.passed:
-            return VerifyResult(
-                passed=False,
-                commits_verified=0,
-                commits_total=commits_total,
-                files_verified=0,
-                encrypted_files=(),
-                errors=preflight.errors,
-                encrypted_files_count=preflight.encrypted_files_count,
-                identities_verified=preflight.identities_verified,
-            )
-
-        pairs_to_check = (
-            self._select_fast_sample(pairs) if self._mode == VerifyMode.FAST else pairs
-        )
+        lock_unlock_shas = self._select_lock_unlock_shas(pairs, self._rewritten_path)
 
         orig_ref: str | None = None
         try:
@@ -187,6 +175,32 @@ class RewriteVerifier:
             pass
 
         try:
+            preflight = run_preflight(
+                rewritten_path=self._rewritten_path,
+                matcher=self._matcher,
+                key_file=preflight_key,
+                gpg_user_ids=self._gpg_user_ids,
+                lock_unlock_shas=lock_unlock_shas,
+            )
+
+            if not preflight.passed:
+                return VerifyResult(
+                    passed=False,
+                    commits_verified=0,
+                    commits_total=commits_total,
+                    files_verified=0,
+                    encrypted_files=(),
+                    errors=preflight.errors,
+                    encrypted_files_count=preflight.encrypted_files_count,
+                    identities_verified=preflight.identities_verified,
+                )
+
+            pairs_to_check = (
+                self._select_fast_sample(pairs)
+                if self._mode == VerifyMode.FAST
+                else pairs
+            )
+
             all_errors, total_files, commits_checked = self._run_commit_verification(
                 pairs_to_check
             )
@@ -277,10 +291,23 @@ class RewriteVerifier:
         return errors
 
     @staticmethod
-    def _select_lock_unlock_shas(pairs: list[tuple[str, str]]) -> list[str]:
+    def _select_lock_unlock_shas(
+        pairs: list[tuple[str, str]], rewritten_path: Path | None = None
+    ) -> list[str]:
         if not pairs:
             return []
-        return [pairs[0][1]]
+        eligible = pairs
+        if rewritten_path is not None:
+            eligible = [
+                p for p in pairs
+                if _has_gitattributes(rewritten_path, p[1])
+            ]
+        if not eligible:
+            return []
+        shas = [eligible[0][1]]
+        if len(eligible) > 2:  # noqa: PLR2004
+            shas.append(eligible[len(eligible) // 2][1])
+        return shas
 
     def _select_fast_sample(
         self, pairs: list[tuple[str, str]]

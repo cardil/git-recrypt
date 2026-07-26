@@ -88,13 +88,18 @@ def _get_all_shas(repo: Path) -> list[str]:
 
 
 def _write_commit_map(original: Path, rewritten: Path) -> None:
-    """Write a commit-map mapping orig->rewritten SHA (all commits, oldest first)."""
     orig_shas = _get_all_shas(original)
     rew_shas = _get_all_shas(rewritten)
+    if len(orig_shas) != len(rew_shas):
+        msg = (
+            f"Commit history length mismatch: original={len(orig_shas)},"
+            f" rewritten={len(rew_shas)}"
+        )
+        raise AssertionError(msg)
     map_dir = rewritten / ".git" / "filter-repo"
     map_dir.mkdir(parents=True, exist_ok=True)
     lines = ["old                                      new\n"]
-    for o, r in zip(orig_shas, rew_shas, strict=False):
+    for o, r in zip(orig_shas, rew_shas, strict=True):
         lines.append(f"{o} {r}\n")
     (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
 

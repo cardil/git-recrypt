@@ -13,6 +13,7 @@ from git_recrypt.manifest import (
     resolve_repo_path,
     save_manifest,
 )
+from git_recrypt.patterns import generate_gitattributes
 
 
 def _write_yaml(tmp_path: Path, content: str) -> Path:
@@ -388,3 +389,19 @@ def test_repo_field_in_yaml_roundtrip(tmp_path: Path) -> None:
 
     # Then repo field is preserved
     assert loaded.repo == "/etc"
+
+
+def test_exclude_dir_style_rejected() -> None:
+    # Given an exclude pattern ending with '/'
+    # When generating gitattributes with a dir-style exclude pattern
+    # Then ValueError is raised
+    with pytest.raises(ValueError, match="ends with '/'"):
+        generate_gitattributes(["*.key"], exclude=["private/"])
+
+
+def test_include_dir_style_rejected() -> None:
+    # Given an include pattern ending with '/'
+    # When generating gitattributes with a dir-style include pattern
+    # Then ValueError is raised
+    with pytest.raises(ValueError, match="ends with '/'"):
+        generate_gitattributes(["secrets/"])

@@ -351,25 +351,32 @@ def _copy_remotes(src: Path, tgt: Path) -> None:
         raw = _run(["remote", "-v"], src)
     except RewriteError:
         return
-    remotes: dict[str, dict[str, str]] = {}
+    remotes: dict[str, dict[str, list[str]]] = {}
     for line in raw.decode(errors="replace").splitlines():
         parts = line.split()
         if len(parts) < 3:  # noqa: PLR2004
             continue
         name, url = parts[0], parts[1]
-        kind = parts[2].strip("()")
+        kind = parts[2].strip("()")  # "fetch" or "push"
         if name not in remotes:
-            remotes[name] = {}
-        remotes[name][kind] = url
+            remotes[name] = {"fetch": [], "push": []}
+        remotes[name][kind].append(url)
     for name, urls in remotes.items():
-        fetch_url = urls.get("fetch", "")
-        push_url = urls.get("push", "")
-        if not fetch_url and not push_url:
+        fetch_urls = urls.get("fetch", [])
+        push_urls = urls.get("push", [])
+        if not fetch_urls and not push_urls:
             continue
-        primary = fetch_url or push_url
+        primary = fetch_urls[0] if fetch_urls else push_urls[0]
         _ = _run(["remote", "add", name, primary], tgt)
-        if push_url and push_url != primary:
-            _ = _run(["remote", "set-url", "--push", name, push_url], tgt)
+        for extra_fetch in fetch_urls[1:]:
+            _ = _run(["remote", "set-url", "--add", name, extra_fetch], tgt)
+        if push_urls and push_urls != fetch_urls:
+            # Clear default push URL (which equals fetch) and set explicit push URLs
+            _ = _run(["remote", "set-url", "--push", name, push_urls[0]], tgt)
+            for extra_push in push_urls[1:]:
+                _ = _run(
+                    ["remote", "set-url", "--add", "--push", name, extra_push], tgt
+                )
 
 
 def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:

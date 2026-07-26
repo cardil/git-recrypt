@@ -46,6 +46,9 @@ class GpgKeyConfig(BaseModel):
         if self.user_ids is not None and self.generate is not None:
             msg = "Exactly one of 'user_ids' or 'generate' must be specified, not both"
             raise ValueError(msg)
+        if self.user_ids is None and self.generate is None:
+            msg = "GPG key config must specify either 'user_ids' or 'generate'"
+            raise ValueError(msg)
         if self.user_ids is not None and len(self.user_ids) == 0:
             msg = "'user_ids' must not be empty; provide at least one GPG user ID"
             raise ValueError(msg)

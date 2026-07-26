@@ -29,5 +29,14 @@ def find_diff() -> str | None:
     return shutil.which("diff")
 
 
+def find_git_crypt() -> str:
+    """Find git-crypt binary in PATH or raise RuntimeError."""
+    path = shutil.which("git-crypt")
+    if path is None:
+        msg = "git-crypt not found in PATH; required for rewriting"
+        raise RuntimeError(msg)
+    return path
+
+
 GIT: Final[str] = find_git()
 GIT_CRYPT: Final[str] = "git-crypt"

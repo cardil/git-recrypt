@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from git_recrypt._wizard_steps import (
     step_branches,
@@ -16,11 +16,6 @@ from git_recrypt._wizard_steps import (
     step_write,
 )
 from git_recrypt.manifest import Manifest
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-_DEFAULT_REPO = "./"
 
 
 def run_wizard(repo_path: Path, output_path: Path) -> Manifest:
@@ -54,7 +49,8 @@ def run_wizard(repo_path: Path, output_path: Path) -> Manifest:
         "detection_profile": profile,
     }
     repo_str = str(repo_path.resolve())
-    if repo_str != _DEFAULT_REPO:
+    cwd_resolved = str(Path.cwd())
+    if repo_str != cwd_resolved:
         manifest_data["repo"] = repo_str
 
     manifest = Manifest.model_validate(manifest_data)
