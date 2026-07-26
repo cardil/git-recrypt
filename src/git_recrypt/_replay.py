@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from git_recrypt._shellout import GIT as _GIT
-from git_recrypt._shellout import GIT_CRYPT as _GIT_CRYPT
+from git_recrypt._shellout import find_git_crypt
 from git_recrypt.errors import RewriteError
 
 if TYPE_CHECKING:
@@ -232,9 +232,10 @@ def make_empty_tree(repo: Path) -> str:
 
 
 def run_git_crypt(repo: Path, args: list[str]) -> None:
+    git_crypt = find_git_crypt()
     try:
         _ = subprocess.run(  # noqa: S603
-            [_GIT_CRYPT, *args],
+            [git_crypt, *args],
             cwd=repo,
             capture_output=True,
             check=True,

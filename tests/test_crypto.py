@@ -180,8 +180,11 @@ def test_generate_symmetric_key_no_git_crypt(tmp_path: Path) -> None:
     # Given -- git-crypt binary is not found
     export_to = tmp_path / "key.key"
     with (
-        patch("git_recrypt.crypto.shutil.which", return_value=None),
-        pytest.raises(CryptoError, match="git-crypt binary not found"),
+        patch(
+            "git_recrypt.crypto.find_git_crypt",
+            side_effect=RuntimeError("not found"),
+        ),
+        pytest.raises(CryptoError, match="git-crypt not found"),
     ):
         generate_symmetric_key(export_to)
 
@@ -193,7 +196,10 @@ def test_generate_symmetric_key_command_fails(tmp_path: Path) -> None:
     failed.returncode = 1
     failed.stderr = b"some error"
     with (
-        patch("git_recrypt.crypto.shutil.which", return_value="/usr/bin/git-crypt"),
+        patch(
+            "git_recrypt.crypto.find_git_crypt",
+            return_value="/usr/bin/git-crypt",
+        ),
         patch("git_recrypt.crypto.subprocess.run", return_value=failed),
         pytest.raises(CryptoError),
     ):

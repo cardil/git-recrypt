@@ -39,4 +39,12 @@ def find_git_crypt() -> str:
 
 
 GIT: Final[str] = find_git()
+# GIT_CRYPT is NOT validated at import time so that non-rewrite commands
+# (detect, init, verify) work without git-crypt installed.  Runtime callers
+# use find_git_crypt() which raises RuntimeError if missing.
 GIT_CRYPT: Final[str] = "git-crypt"
+
+
+def get_git_crypt() -> str:
+    """Return validated git-crypt path. Cached after first call."""
+    return find_git_crypt()

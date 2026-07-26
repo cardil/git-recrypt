@@ -6,14 +6,14 @@ import subprocess
 from typing import TYPE_CHECKING, Final
 
 from git_recrypt._shellout import GIT as _GIT
-from git_recrypt._shellout import find_gpg
+from git_recrypt._shellout import find_git_crypt, find_gpg
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-_GIT_CRYPT: Final = "git-crypt"
+
 
 
 def _get_gpg() -> str:
@@ -161,7 +161,7 @@ def run_git_crypt_status(repo_path: Path) -> list[tuple[str, bool]]:
         CryptoError: If git-crypt status fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_GIT_CRYPT, "status"],
+        [find_git_crypt(), "status"],
         cwd=repo_path,
         capture_output=True,
         check=False,
@@ -199,7 +199,7 @@ def run_git_crypt_unlock(
     """
     import os  # noqa: PLC0415
 
-    cmd = [_GIT_CRYPT, "unlock"]
+    cmd = [find_git_crypt(), "unlock"]
     if key_file is not None:
         cmd.append(str(key_file))
     run_env = {**os.environ, **(env or {})}
@@ -225,7 +225,7 @@ def run_git_crypt_lock(repo_path: Path) -> None:
         CryptoError: If git-crypt lock fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_GIT_CRYPT, "lock"],
+        [find_git_crypt(), "lock"],
         cwd=repo_path,
         capture_output=True,
         check=False,

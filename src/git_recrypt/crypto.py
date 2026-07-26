@@ -5,21 +5,19 @@ from __future__ import annotations
 import getpass
 import os
 import secrets
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from git_recrypt._shellout import find_gpg
+from git_recrypt._shellout import find_git_crypt, find_gpg
 from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
     from git_recrypt.manifest import KeyConfig
 
 GITCRYPT_HEADER: Final = b"\x00GITCRYPT\x00"
-_GIT_CRYPT_BIN: Final = "git-crypt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +30,10 @@ class CryptoEngine:
         """Validate key file exists and git-crypt is available."""
         if not self.key_file.exists():
             raise CryptoError(detail=f"Key file not found: {self.key_file}")
-        if shutil.which(_GIT_CRYPT_BIN) is None:
-            raise CryptoError(detail="git-crypt binary not found in PATH")
+        try:
+            find_git_crypt()
+        except RuntimeError:
+            raise CryptoError(detail="git-crypt binary not found in PATH")  # noqa: B904
 
     def encrypt(self, plaintext: bytes) -> bytes:
         """Encrypt plaintext via git-crypt clean --key-file.
@@ -62,7 +62,7 @@ class CryptoEngine:
     def _run_git_crypt(self, subcommand: str, input_data: bytes) -> bytes:
         """Run git-crypt clean/smudge as a subprocess pipe."""
         result = subprocess.run(  # noqa: S603
-            [_GIT_CRYPT_BIN, subcommand, "--key-file", str(self.key_file)],
+            [find_git_crypt(), subcommand, "--key-file", str(self.key_file)],
             input=input_data,
             capture_output=True,
             check=False,
@@ -109,9 +109,11 @@ def generate_symmetric_key(export_to: Path) -> Path:
     Raises CryptoError if the command fails or the file is missing/empty.
     Returns the path to the generated key file.
     """
-    if shutil.which(_GIT_CRYPT_BIN) is None:
-        raise CryptoError(detail="git-crypt binary not found in PATH")
-    _ = _run_cmd([_GIT_CRYPT_BIN, "keygen", str(export_to)])
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
+    _ = _run_cmd([gc, "keygen", str(export_to)])
     if not export_to.exists() or export_to.stat().st_size == 0:
         raise CryptoError(detail=f"Key file not created or empty: {export_to}")
     return export_to
@@ -119,21 +121,25 @@ def generate_symmetric_key(export_to: Path) -> Path:
 
 def init_gpg_repo(repo_path: Path, user_ids: list[str]) -> None:
     """Run git-crypt init + add-gpg-user on a repo. Mutates the repo."""
-    if shutil.which(_GIT_CRYPT_BIN) is None:
-        raise CryptoError(detail="git-crypt binary not found in PATH")
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
 
     git_crypt_dir = repo_path / ".git" / "git-crypt"
     if not git_crypt_dir.is_dir():
-        _ = _run_cmd([_GIT_CRYPT_BIN, "init"], cwd=repo_path)
+        _ = _run_cmd([gc, "init"], cwd=repo_path)
 
     for uid in user_ids:
-        _ = _run_cmd([_GIT_CRYPT_BIN, "add-gpg-user", uid], cwd=repo_path)
+        _ = _run_cmd([gc, "add-gpg-user", uid], cwd=repo_path)
 
 
 def export_gpg_key(repo_path: Path) -> Path:
     """Export the symmetric key from a git-crypt-initialized repo (read-only)."""
-    if shutil.which(_GIT_CRYPT_BIN) is None:
-        raise CryptoError(detail="git-crypt binary not found in PATH")
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
 
     git_crypt_dir = repo_path / ".git" / "git-crypt"
     if not git_crypt_dir.is_dir():
@@ -146,7 +152,7 @@ def export_gpg_key(repo_path: Path) -> Path:
     tmp_fd, tmp_path_str = tempfile.mkstemp(prefix="gcri-gpg-key-", suffix=".key")
     os.close(tmp_fd)
     exported = Path(tmp_path_str)
-    _ = _run_cmd([_GIT_CRYPT_BIN, "export-key", str(exported)], cwd=repo_path)
+    _ = _run_cmd([gc, "export-key", str(exported)], cwd=repo_path)
 
     if not exported.exists() or exported.stat().st_size == 0:
         raise CryptoError(detail=f"Exported key file missing or empty: {exported}")
