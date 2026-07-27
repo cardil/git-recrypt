@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import shutil
 from typing import Final
 
@@ -29,13 +30,16 @@ def find_diff() -> str | None:
     return shutil.which("diff")
 
 
+@functools.cache
 def find_git_crypt() -> str:
-    """Find git-crypt binary in PATH or raise RuntimeError."""
+    """Find and cache absolute git-crypt path, or raise RuntimeError."""
     path = shutil.which("git-crypt")
     if path is None:
         msg = "git-crypt not found in PATH; required for rewriting"
         raise RuntimeError(msg)
-    return path
+    from pathlib import Path  # noqa: PLC0415
+
+    return str(Path(path).resolve())
 
 
 GIT: Final[str] = find_git()
@@ -43,8 +47,3 @@ GIT: Final[str] = find_git()
 # (detect, init, verify) work without git-crypt installed.  Runtime callers
 # use find_git_crypt() which raises RuntimeError if missing.
 GIT_CRYPT: Final[str] = "git-crypt"
-
-
-def get_git_crypt() -> str:
-    """Return validated git-crypt path. Cached after first call."""
-    return find_git_crypt()

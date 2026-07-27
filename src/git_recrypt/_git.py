@@ -160,8 +160,12 @@ def run_git_crypt_status(repo_path: Path) -> list[tuple[str, bool]]:
     Raises:
         CryptoError: If git-crypt status fails.
     """
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
     result = subprocess.run(  # noqa: S603
-        [find_git_crypt(), "status"],
+        [gc, "status"],
         cwd=repo_path,
         capture_output=True,
         check=False,
@@ -199,7 +203,11 @@ def run_git_crypt_unlock(
     """
     import os  # noqa: PLC0415
 
-    cmd = [find_git_crypt(), "unlock"]
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
+    cmd = [gc, "unlock"]
     if key_file is not None:
         cmd.append(str(key_file))
     run_env = {**os.environ, **(env or {})}
@@ -224,8 +232,12 @@ def run_git_crypt_lock(repo_path: Path) -> None:
     Raises:
         CryptoError: If git-crypt lock fails.
     """
+    try:
+        gc = find_git_crypt()
+    except RuntimeError:
+        raise CryptoError(detail="git-crypt not found in PATH")  # noqa: B904
     result = subprocess.run(  # noqa: S603
-        [find_git_crypt(), "lock"],
+        [gc, "lock"],
         cwd=repo_path,
         capture_output=True,
         check=False,
