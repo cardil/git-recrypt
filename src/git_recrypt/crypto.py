@@ -38,12 +38,14 @@ class CryptoEngine:
     def encrypt(self, plaintext: bytes) -> bytes:
         """Encrypt plaintext via git-crypt clean --key-file.
 
-        Returns encrypted bytes. If already encrypted (starts with GITCRYPT header),
-        returns data unchanged (idempotent).
+        Always invoke the clean filter -- it handles already-encrypted data.
+        A prefix-only check could be fooled by crafted plaintext starting
+        with the GITCRYPT magic header.
         Raises CryptoError on subprocess failure.
         """
-        if is_encrypted(plaintext):
-            return plaintext
+        # Always invoke the clean filter -- it handles already-encrypted data.
+        # A prefix-only check could be fooled by crafted plaintext starting
+        # with the GITCRYPT magic header.
         return self._run_git_crypt("clean", plaintext)
 
     def decrypt(self, ciphertext: bytes) -> bytes:
@@ -250,16 +252,25 @@ def resolve_key_from_manifest(
 
     Returns (key_path, message) where message describes what was done (or None).
     Raises CryptoError on failure.
-    The _repo_path parameter is kept for API compatibility but is no longer used
-    (GPG key setup now uses a fresh temp repo instead of cloning the source).
     """
     if key_config.symmetric is not None:
         kf = key_config.symmetric.key_file
         if kf == "generate":
-            export_to = Path(key_config.symmetric.export_to)
+            export_to = Path(key_config.symmetric.export_to).resolve()
+            repo_resolved = _repo_path.resolve()
+            if repo_resolved in export_to.parents or export_to == repo_resolved:
+                raise CryptoError(
+                    detail=f"Key export path '{export_to}' is inside the source repo."
+                           " Use a path outside the source repository."
+                )
             key_path = generate_symmetric_key(export_to)
             return key_path, f"Generated symmetric key: {key_path}"
-        return Path(kf), None
+        key_path = Path(kf)
+        if not key_path.exists():
+            raise CryptoError(
+                detail=f"Symmetric key file not found: {kf}"
+            )
+        return key_path, None
 
     gpg_cfg = key_config.gpg
     if gpg_cfg is None:

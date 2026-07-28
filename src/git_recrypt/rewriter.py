@@ -260,11 +260,13 @@ class HistoryRewriter:
         fmt += ["--", ":!.git-crypt", ":!.gitattributes"]
         patch = _run(fmt, src)
         if not patch.strip():
+            _merge_source_gitattributes(src, tgt, sha)
             _ = _run(["add", "-A"], tgt)
             _commit_with_meta(tgt, meta)
             return
         _dump_debug_patch(src, sha, patch)
         _git_apply(tgt, patch)
+        _merge_source_gitattributes(src, tgt, sha)
         _ = _run(["add", "-A"], tgt)
         _commit_with_meta(tgt, meta)
 
@@ -292,6 +294,7 @@ class HistoryRewriter:
         if patch.strip():
             _dump_debug_patch(src, sha, patch)
             _git_apply(tgt, patch)
+        _merge_source_gitattributes(src, tgt, sha)
         _ = _run(["add", "-A"], tgt)
         _commit_merge_with_meta(tgt, meta, mapped_parents)
         _ = _run(["checkout", self._branch], tgt)
@@ -316,6 +319,32 @@ class HistoryRewriter:
                 timestamp=datetime.now(tz=UTC).isoformat(),
             ),
         )
+
+
+def _merge_source_gitattributes(src: Path, tgt: Path, sha: str) -> None:
+    """Merge non-git-crypt lines from source .gitattributes at sha into target."""
+    try:
+        raw = _run(["show", f"{sha}:.gitattributes"], src)
+        src_lines = raw.decode(errors="replace").splitlines()
+    except RewriteError:
+        # .gitattributes may not exist at this SHA -- that's fine
+        return
+    ga = tgt / ".gitattributes"
+    existing = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
+    existing_set = set(existing)
+    added = False
+    for line in src_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "filter=git-crypt" in stripped or "diff=git-crypt" in stripped:
+            continue
+        if stripped not in existing_set:
+            existing.append(line)
+            existing_set.add(stripped)
+            added = True
+    if added:
+        _ = ga.write_text("\n".join(existing) + "\n", encoding="utf-8")
 
 
 def _dump_debug_patch(src: Path, sha: str, patch: bytes) -> None:
@@ -481,7 +510,10 @@ def _assert_gpg_keys_available(manifest: Manifest) -> None:
         _gpg = None
     if _gpg is None:
         msg = "gpg not found in PATH"
-        raise RuntimeError(msg)
+        raise RewriteError(phase="pre-check", detail=msg)
+    # GPG preflight needs at least ONE secret key for verification (git-crypt unlock).
+    # Other user_ids are public-key recipients -- they only need public keys available,
+    # which git-crypt add-gpg-user validates at setup time.
     for uid in gpg_cfg.user_ids:
         r = subprocess.run(  # noqa: S603
             [_gpg, "--list-secret-keys", "--with-colons", uid],

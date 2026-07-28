@@ -108,6 +108,10 @@ class GenericDetector(BaseDetector):
                 if exclude_spec.match_file(rel_str):
                     continue
 
+                # Skip non-regular files (symlinks, pipes, sockets, etc.)
+                if abs_path.is_symlink() or not abs_path.is_file():
+                    continue
+
                 if path_spec.match_file(rel_str):
                     # Derive a simple glob pattern from the file extension or name.
                     suggested = _glob_for(filename)
@@ -120,10 +124,6 @@ class GenericDetector(BaseDetector):
                             suggested_pattern=suggested,
                         )
                     )
-                    continue
-
-                # Skip non-regular files (symlinks, pipes, sockets, etc.)
-                if abs_path.is_symlink() or not abs_path.is_file():
                     continue
 
                 # Content sniffing for files that didn't match by path.
@@ -141,14 +141,14 @@ class GenericDetector(BaseDetector):
                 if reason is None:
                     continue
 
-                suggested = _glob_for(filename)
-                suggested_set.add(suggested)
+                # Content match: use the specific path, not a broad extension glob.
+                suggested_set.add(rel_str)
                 secrets.append(
                     DetectedSecret(
                         filepath=rel_str,
                         severity=Severity.HIGH,
                         reason=f"content matches indicator: {reason}",
-                        suggested_pattern=suggested,
+                        suggested_pattern=rel_str,
                     )
                 )
 

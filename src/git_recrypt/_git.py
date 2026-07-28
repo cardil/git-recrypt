@@ -21,17 +21,23 @@ def _get_gpg() -> str:
     return find_gpg()
 
 
-def get_commit_list(repo_path: Path) -> list[str]:
+def get_commit_list(repo_path: Path, branch: str | None = None) -> list[str]:
     """Return list of commit SHAs in rev-list order (newest first).
 
     Args:
         repo_path: Path to the git repository.
+        branch: Branch name to list commits for. If None, uses --all.
 
     Returns:
         List of full SHA strings.
     """
+    cmd = [_GIT, "rev-list"]
+    if branch is not None:
+        cmd.append(branch)
+    else:
+        cmd.append("--all")
     result = subprocess.run(  # noqa: S603
-        [_GIT, "rev-list", "--all"],
+        cmd,
         cwd=repo_path,
         capture_output=True,
         check=True,
@@ -76,7 +82,9 @@ def get_file_list(repo_path: Path, sha: str) -> list[str]:
     return files
 
 
-def load_commit_map(rewritten_path: Path) -> dict[str, str]:
+def load_commit_map(
+    rewritten_path: Path, source_repo: Path | None = None
+) -> dict[str, str]:
     """Load commit map from state dir or legacy filter-repo location."""
     from pathlib import Path as _Path  # noqa: PLC0415
 
@@ -91,7 +99,15 @@ def load_commit_map(rewritten_path: Path) -> dict[str, str]:
             if not entry.is_dir():
                 continue
             cfg = load_config(entry)
-            if cfg is not None and cfg.target_repo == str(rewritten_path.resolve()):
+            source_matches = source_repo is None or (
+                cfg is not None
+                and cfg.source_repo == str(source_repo.resolve())
+            )
+            if (
+                cfg is not None
+                and cfg.target_repo == str(rewritten_path.resolve())
+                and source_matches
+            ):
                 return load_commit_map_from_state(entry)
 
     map_file = rewritten_path / ".git" / "filter-repo" / "commit-map"

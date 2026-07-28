@@ -154,7 +154,7 @@ def test_symmetric_key_generate(tmp_path: Path, mock_detection: MagicMock) -> No
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "root", "HEAD"]
+                ["generic", "symmetric", "generate", "HEAD"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -188,7 +188,7 @@ def test_symmetric_key_existing_file(tmp_path: Path, mock_detection: MagicMock) 
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "provide existing", "root", "HEAD"]
+                ["generic", "symmetric", "provide existing", "HEAD"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -223,7 +223,7 @@ def test_gpg_key_user_ids(tmp_path: Path, mock_detection: MagicMock) -> None:
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
-            side_effect=_iter_select(["generic", "gpg", "root", "HEAD"]),
+            side_effect=_iter_select(["generic", "gpg", "HEAD"]),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch(
@@ -248,27 +248,30 @@ def test_gpg_key_user_ids(tmp_path: Path, mock_detection: MagicMock) -> None:
 
 
 def test_gpg_key_generate(tmp_path: Path, mock_detection: MagicMock) -> None:
-    # Given: user selects gpg + empty user IDs (generate) + random passphrase
+    # Given: user selects gpg + provides user IDs
+    # (generate flow removed; wizard loops until non-empty)
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, gpg_passphrase_mode, introduce_at, branches
-    # text order: custom_pattern_stop, gpg_user_ids (empty → generate), exclusion_stop
+    # select order: profile, key_type, branches
+    # text order: custom_pattern_stop, gpg_user_ids, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
-            side_effect=_iter_select(["generic", "gpg", "random", "root", "HEAD"]),
+            side_effect=_iter_select(["generic", "gpg", "HEAD"]),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
-        patch("questionary.text", side_effect=_iter_text(["", "", ""])),
+        patch(
+            "questionary.text",
+            side_effect=_iter_text(["", "alice@example.com", ""]),
+        ),
     ):
         manifest = run_wizard(tmp_path, output)
 
-    # Then
+    # Then: user IDs are set; no generate config
     assert manifest.key.gpg is not None
-    assert manifest.key.gpg.generate is not None
-    assert manifest.key.gpg.generate.passphrase == "random"  # noqa: S105
-    assert manifest.key.gpg.user_ids is None
+    assert manifest.key.gpg.user_ids == ["alice@example.com"]
+    assert manifest.key.gpg.generate is None
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +322,6 @@ def test_conflict_overwrite(tmp_path: Path, mock_detection: MagicMock) -> None:
                     "generic",
                     "symmetric",
                     "generate",
-                    "root",
                     "HEAD",
                     "overwrite",
                 ]
@@ -357,7 +359,6 @@ def test_conflict_merge(tmp_path: Path, mock_detection: MagicMock) -> None:
                     "generic",
                     "symmetric",
                     "generate",
-                    "root",
                     "HEAD",
                     "merge",
                 ]
@@ -396,7 +397,6 @@ def test_conflict_different_path(tmp_path: Path, mock_detection: MagicMock) -> N
                     "generic",
                     "symmetric",
                     "generate",
-                    "root",
                     "HEAD",
                     "save to different path",
                 ]
@@ -420,12 +420,11 @@ def test_conflict_different_path(tmp_path: Path, mock_detection: MagicMock) -> N
 
 
 def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> None:
-    # Given: user selects "specific SHA" and provides a valid SHA (not yet implemented)
+    # Given: step_introduce_at() always returns "root" (SHA option no longer selectable)
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, introduce_at, branches
-    # text order: custom_pattern_stop, sha_value, exclusion_stop
-    # Then: validation raises because SHA-based introduction is not yet implemented
+    # select order: profile, key_type, sym_mode, branches
+    # text order: custom_pattern_stop, exclusion_stop
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
@@ -435,16 +434,17 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
                     "generic",
                     "symmetric",
                     "generate",
-                    "specific SHA",
                     "HEAD",
                 ]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
-        patch("questionary.text", side_effect=_iter_text(["", _SHA, ""])),
-        pytest.raises(Exception, match="not yet implemented"),
+        patch("questionary.text", side_effect=_iter_text(["", ""])),
     ):
-        run_wizard(tmp_path, output)
+        manifest = run_wizard(tmp_path, output)
+
+    # Then: introduce_at is always "root"
+    assert manifest.introduce_at == "root"
 
 
 # ---------------------------------------------------------------------------
@@ -454,25 +454,26 @@ def test_sha_introduction_point(tmp_path: Path, mock_detection: MagicMock) -> No
 
 
 def test_specific_branch_selection(tmp_path: Path, mock_detection: MagicMock) -> None:
-    # Given: user selects "specific" branches and provides multiple branch names
+    # Given: user selects "specific" branches and provides comma-separated names
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, branches
     # text order: custom_pattern_stop, branch_names, exclusion_stop
-    # Then: multi-branch is not yet implemented, validation raises
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "root", "specific"]
+                ["generic", "symmetric", "generate", "specific"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch("questionary.text", side_effect=_iter_text(["", "main, develop", ""])),
-        pytest.raises(Exception, match="not yet implemented"),
     ):
-        run_wizard(tmp_path, output)
+        manifest = run_wizard(tmp_path, output)
+
+    # Then: only first branch is taken; comma-separated extras are dropped
+    assert manifest.branches == ["main"]
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +493,7 @@ def test_exclusion_patterns(tmp_path: Path, mock_detection: MagicMock) -> None:
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "root", "HEAD"]
+                ["generic", "symmetric", "generate", "HEAD"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -614,7 +615,6 @@ def test_conflict_merge_deduplicates(tmp_path: Path, mock_detection: MagicMock) 
                     "generic",
                     "symmetric",
                     "generate",
-                    "root",
                     "HEAD",
                     "merge",
                 ]
@@ -646,7 +646,7 @@ def test_all_branches_selection(tmp_path: Path, mock_detection: MagicMock) -> No
         patch(
             "questionary.select",
             side_effect=_iter_select(
-                ["generic", "symmetric", "generate", "root", "all"]
+                ["generic", "symmetric", "generate", "all"]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
@@ -666,12 +666,12 @@ def test_all_branches_selection(tmp_path: Path, mock_detection: MagicMock) -> No
 def test_first_match_introduction_point(
     tmp_path: Path, mock_detection: MagicMock
 ) -> None:
-    # Given: user selects "first-match" introduction point (not yet implemented)
+    # Given: step_introduce_at() always returns "root"
+    # (first-match no longer selectable)
     output = tmp_path / "manifest.yaml"
 
-    # select order: profile, key_type, sym_mode, introduce_at, branches
+    # select order: profile, key_type, sym_mode, branches
     # text order: custom_pattern_stop, exclusion_stop
-    # Then: validation raises because first-match is not yet implemented
     with (
         patch("git_recrypt._wizard_steps.run_detection", return_value=mock_detection),
         patch(
@@ -681,13 +681,14 @@ def test_first_match_introduction_point(
                     "generic",
                     "symmetric",
                     "generate",
-                    "first-match",
                     "HEAD",
                 ]
             ),
         ),
         patch("questionary.checkbox", return_value=_make_question(["secrets/**"])),
         patch("questionary.text", return_value=_make_question("")),
-        pytest.raises(Exception, match="not yet implemented"),
     ):
-        run_wizard(tmp_path, output)
+        manifest = run_wizard(tmp_path, output)
+
+    # Then: introduce_at is always "root"
+    assert manifest.introduce_at == "root"

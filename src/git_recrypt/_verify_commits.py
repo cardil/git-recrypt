@@ -105,6 +105,7 @@ def verify_commit_checkout(
     orig_path: Path,
     orig_sha: str,
     rew_sha: str,
+    source_copy: Path,
 ) -> list[str]:
     if _DIFF is None:
         return [f"commit {rew_sha[:8]}: diff not found in PATH"]
@@ -122,13 +123,16 @@ def verify_commit_checkout(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         wt_cmd = [
-            GIT, "-C", str(orig_path),
+            GIT, "-C", str(source_copy),
             "worktree", "add", "--detach", tmpdir, orig_sha,
         ]
         wt_result = subprocess.run(wt_cmd, capture_output=True, check=False)  # noqa: S603
         if wt_result.returncode != 0:
             stderr_str = wt_result.stderr.decode(errors="replace")
-            return [f"commit {rew_sha[:8]}: worktree add failed: {stderr_str.strip()}"]
+            return [
+                f"commit {rew_sha[:8]}: worktree add failed"
+                f" (orig: {orig_path}): {stderr_str.strip()}"
+            ]
 
         try:
             diff_result = subprocess.run(  # noqa: S603
@@ -155,10 +159,16 @@ def verify_commit_checkout(
                     _parse_diff_output(stdout, stderr, tmpdir, rewritten_path, rew_sha)
                 )
         finally:
-            _ = subprocess.run(  # noqa: S603
-                [GIT, "-C", str(orig_path), "worktree", "remove", "--force", tmpdir],
+            cleanup = subprocess.run(  # noqa: S603
+                [GIT, "-C", str(source_copy), "worktree", "remove", "--force", tmpdir],
                 capture_output=True,
                 check=False,
             )
+            if cleanup.returncode != 0:
+                stderr_str = cleanup.stderr.decode(errors="replace")
+                errors.append(
+                    f"commit {rew_sha[:8]}: worktree cleanup warning:"
+                    f" {stderr_str.strip()}"
+                )
 
     return errors

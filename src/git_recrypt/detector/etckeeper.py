@@ -72,11 +72,19 @@ def _build_spec(patterns: tuple[str, ...]) -> GitIgnoreSpec:
     return GitIgnoreSpec.from_lines(patterns)
 
 
+_COMPILED_SPECS: dict[str, GitIgnoreSpec] = {}
+
+
+def _get_spec(pattern: str) -> GitIgnoreSpec:
+    if pattern not in _COMPILED_SPECS:
+        _COMPILED_SPECS[pattern] = GitIgnoreSpec.from_lines([pattern])
+    return _COMPILED_SPECS[pattern]
+
+
 def _match_pattern(rel: str, patterns: tuple[str, ...]) -> str | None:
     """Return the first glob pattern from *patterns* that matches *rel*."""
     for pattern in patterns:
-        spec = GitIgnoreSpec.from_lines([pattern])
-        if spec.match_file(rel):
+        if _get_spec(pattern).match_file(rel):
             return pattern
     return None
 
@@ -87,9 +95,11 @@ def _rel(repo_path: Path, file: Path) -> str:
 
 def _has_password_content(file: Path) -> bool:
     try:
-        text = file.read_text(encoding="utf-8", errors="replace")
+        with file.open("rb") as fh:
+            raw = fh.read(8192)
     except OSError:
         return False
+    text = raw.decode("utf-8", errors="replace")
     return bool(_PASSWORD_RE.search(text))
 
 

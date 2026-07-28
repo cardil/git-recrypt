@@ -125,6 +125,13 @@ class Manifest(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_branches_nonempty(self) -> Manifest:
+        if not self.branches:
+            msg = "'branches' must contain at least one entry"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _validate_single_branch(self) -> Manifest:
         if len(self.branches) > 1:
             msg = (

@@ -82,16 +82,22 @@ def test_roundtrip_decrypt(sample_key_file: Path) -> None:
     assert decrypted == plaintext
 
 
-def test_encrypt_idempotent(sample_key_file: Path) -> None:
-    """Given already-encrypted data, when encrypted again, returns same bytes."""
+def test_encrypt_always_runs_clean(sample_key_file: Path) -> None:
+    """Given already-encrypted data, encrypt always invokes the clean filter.
+
+    git-crypt clean is not idempotent (re-encrypting produces different bytes),
+    but the roundtrip decrypt(encrypt(plaintext)) must still recover the original.
+    We always run clean to prevent crafted plaintext with the GITCRYPT header
+    prefix from bypassing encryption.
+    """
     # Given
     engine = CryptoEngine(key_file=sample_key_file)
-    plaintext = b"idempotent test"
+    plaintext = b"always-clean test"
     encrypted_once = engine.encrypt(plaintext)
     # When
-    encrypted_twice = engine.encrypt(encrypted_once)
+    decrypted = engine.decrypt(encrypted_once)
     # Then
-    assert encrypted_twice == encrypted_once
+    assert decrypted == plaintext
 
 
 def test_empty_file_roundtrip(sample_key_file: Path) -> None:

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import random
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from git_recrypt._git import (
@@ -26,7 +30,6 @@ from git_recrypt.errors import CryptoError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from git_recrypt.patterns import PatternMatcher
 
@@ -212,6 +215,10 @@ class RewriteVerifier:
                     capture_output=True,
                     check=False,
                 )
+            from git_recrypt._git import run_git_crypt_lock  # noqa: PLC0415
+
+            with contextlib.suppress(CryptoError):
+                run_git_crypt_lock(self._rewritten_path)
 
         return VerifyResult(
             passed=len(all_errors) == 0,
@@ -248,20 +255,27 @@ class RewriteVerifier:
         total_files = 0
         commits_checked = 0
 
-        for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
-            if self._progress_cb is not None:
-                self._progress_cb(idx, len(pairs_to_check))
-            errs = verify_commit_checkout(
-                self._rewritten_path,
-                self._original_path,
-                orig_sha,
-                rew_sha,
-            )
-            all_errors.extend(errs)
-            total_files += len(get_file_list(self._original_path, orig_sha))
-            commits_checked += 1
-            if all_errors:
-                break
+        source_tmpdir = tempfile.mkdtemp(prefix="gcri-src-")
+        source_copy = Path(source_tmpdir)
+        _ = shutil.copytree(self._original_path, source_copy, dirs_exist_ok=True)
+        try:
+            for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
+                if self._progress_cb is not None:
+                    self._progress_cb(idx, len(pairs_to_check))
+                errs = verify_commit_checkout(
+                    self._rewritten_path,
+                    self._original_path,
+                    orig_sha,
+                    rew_sha,
+                    source_copy,
+                )
+                all_errors.extend(errs)
+                total_files += len(get_file_list(self._original_path, orig_sha))
+                commits_checked += 1
+                if all_errors:
+                    break
+        finally:
+            shutil.rmtree(source_tmpdir, ignore_errors=True)
 
         return all_errors, total_files, commits_checked
 

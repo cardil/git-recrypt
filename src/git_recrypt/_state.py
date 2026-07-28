@@ -42,7 +42,7 @@ def debug_dir_for_repo(source_repo: Path) -> Path:
 
 
 def is_debug() -> bool:
-    return bool(os.environ.get(DEBUG_ENV))
+    return os.environ.get(DEBUG_ENV) == "1"
 
 
 def save_commit_map(state_dir: Path, mapping: dict[str, str]) -> None:

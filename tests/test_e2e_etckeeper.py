@@ -85,13 +85,19 @@ def _write(path: Path, content: str | bytes) -> None:
         _ = path.write_text(content, encoding="utf-8")
 
 
-def _git_show(repo: Path, ref: str, filepath: str) -> bytes:
+def _git_show(
+    repo: Path, ref: str, filepath: str, *, must_exist: bool = False
+) -> bytes:
     result = subprocess.run(  # noqa: S603
         [_GIT, "show", f"{ref}:{filepath}"],
         cwd=repo,
         capture_output=True,
         check=False,
     )
+    if must_exist and result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace")
+        msg = f"git show {ref}:{filepath} failed (rc={result.returncode}): {stderr}"
+        raise AssertionError(msg)
     return result.stdout
 
 
@@ -432,7 +438,7 @@ def test_etckeeper_rewrite_and_verify(
         "cockpit/ws-certs.d/0-self-signed.key",
     ]
     for fp in encrypted_at_head:
-        content = _git_show(rewritten, "HEAD", fp)
+        content = _git_show(rewritten, "HEAD", fp, must_exist=True)
         assert content.startswith(GITCRYPT_HEADER), f"{fp} should be encrypted at HEAD"
 
     # Non-encrypted files at HEAD (cert9.db also deleted in commit 16)
@@ -448,7 +454,7 @@ def test_etckeeper_rewrite_and_verify(
         "containers/apps/ldap/config.yml",
     ]
     for fp in not_encrypted_at_head:
-        content = _git_show(rewritten, "HEAD", fp)
+        content = _git_show(rewritten, "HEAD", fp, must_exist=True)
         assert not is_encrypted(content), f"{fp} should NOT be encrypted at HEAD"
 
     # Run verifier
@@ -524,12 +530,16 @@ def test_etckeeper_binary_files_handled(
     # 2 setup commits + 16 replayed; commit 2 (index 1 in orig) is at rew index 2+1=3
     commit2_sha = rew_commits[3]
 
-    key4_content = _git_show(rewritten, commit2_sha, "pki/nssdb/key4.db")
+    key4_content = _git_show(
+        rewritten, commit2_sha, "pki/nssdb/key4.db", must_exist=True
+    )
     assert key4_content.startswith(GITCRYPT_HEADER), (
         "pki/nssdb/key4.db (binary) should be encrypted in commit where it was added"
     )
 
-    cert9_content = _git_show(rewritten, commit2_sha, "pki/nssdb/cert9.db")
+    cert9_content = _git_show(
+        rewritten, commit2_sha, "pki/nssdb/cert9.db", must_exist=True
+    )
     assert not is_encrypted(cert9_content), (
         "pki/nssdb/cert9.db should NOT be encrypted (not in patterns)"
     )
@@ -590,7 +600,7 @@ def test_etckeeper_modified_secrets_stay_encrypted(
     # Verify shadow is encrypted in every rewritten commit where it exists.
     for idx in shadow_orig_indices:
         rew_sha = rew_replayed[idx]
-        content = _git_show(rewritten, rew_sha, "shadow")
+        content = _git_show(rewritten, rew_sha, "shadow", must_exist=True)
         assert content.startswith(GITCRYPT_HEADER), (
             f"shadow not encrypted in rewritten commit {rew_sha} (orig index {idx})"
         )
@@ -632,7 +642,9 @@ def test_etckeeper_binary_deletion_handled(
         check=True,
     ).stdout.decode().strip().splitlines()
     commit2_sha = rew_commits[3]  # 2 setup + orig index 1 = index 3
-    key4_at_commit2 = _git_show(rewritten, commit2_sha, "pki/nssdb/key4.db")
+    key4_at_commit2 = _git_show(
+        rewritten, commit2_sha, "pki/nssdb/key4.db", must_exist=True
+    )
     assert key4_at_commit2.startswith(GITCRYPT_HEADER), (
         "pki/nssdb/key4.db should be encrypted in the commit where it was added"
     )
@@ -664,11 +676,11 @@ def test_etckeeper_symlinks_handled(
     assert sshd == b"", "sshd.service should not exist at HEAD (renamed)"
 
     openssh_path = "systemd/system/multi-user.target.wants/openssh.service"
-    openssh = _git_show(rewritten, "HEAD", openssh_path)
+    openssh = _git_show(rewritten, "HEAD", openssh_path, must_exist=True)
     assert openssh == b"/usr/lib/systemd/system/sshd.service"
 
     # python3 symlink updated to python3.14 (modified in commit 18)
-    py3 = _git_show(rewritten, "HEAD", "alternatives/python3")
+    py3 = _git_show(rewritten, "HEAD", "alternatives/python3", must_exist=True)
     assert py3 == b"/usr/bin/python3.14"
 
     # chronyd.service deleted in commit 19 -- must not exist at HEAD
@@ -713,7 +725,7 @@ def test_etckeeper_merge_commits_preserved(
 
     # The nginx key must be encrypted at HEAD (merged from feature branch)
     nginx_key_path = "pki/nginx/private/wildcard.example.com.key"
-    nginx_key = _git_show(rewritten, "HEAD", nginx_key_path)
+    nginx_key = _git_show(rewritten, "HEAD", nginx_key_path, must_exist=True)
     assert nginx_key.startswith(GITCRYPT_HEADER), (
         f"{nginx_key_path} should be encrypted at HEAD"
     )

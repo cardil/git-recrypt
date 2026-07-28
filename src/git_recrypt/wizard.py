@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from git_recrypt._wizard_steps import (
     step_branches,
@@ -48,10 +51,9 @@ def run_wizard(repo_path: Path, output_path: Path) -> Manifest:
         "exclude": exclude,
         "detection_profile": profile,
     }
-    repo_str = str(repo_path.resolve())
-    cwd_resolved = str(Path.cwd())
-    if repo_str != cwd_resolved:
-        manifest_data["repo"] = repo_str
+    # Always persist the resolved repo path so a later `run` resolves
+    # correctly even when the manifest is invoked from a different directory.
+    manifest_data["repo"] = str(repo_path.resolve())
 
     manifest = Manifest.model_validate(manifest_data)
     final_manifest, final_path = step_conflict(output_path, manifest)

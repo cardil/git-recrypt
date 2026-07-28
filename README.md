@@ -84,7 +84,7 @@ The manifest is a YAML file (default name: `git-recrypt.yaml`) that describes ho
 | Field | Description |
 |---|---|
 | `key.gpg.user_ids` | List of GPG user IDs (email addresses) to add as recipients. |
-| `key.gpg.generate` | Auto-generate a GPG key. Sub-fields: `name`, `email`, `algorithm` (default: `ed25519`), `expire` (default: `"0"`), `passphrase` (`"provided"` or `"random"`). |
+| `key.gpg.generate` | *Not yet implemented.* Auto-generate a GPG key. Planned sub-fields: `name`, `email`, `algorithm` (default: `ed25519`), `expire` (default: `"0"`), `passphrase` (`"provided"` or `"random"`). |
 
 ### GPG manifest example (etckeeper)
 
@@ -202,7 +202,7 @@ git-recrypt verify ORIGINAL REWRITTEN KEY_FILE [--manifest FILE] [--mode MODE]
 |---|---|---|
 | `original` | -- | Path to the original (source) repo. |
 | `rewritten` | -- | Path to the rewritten repo. |
-| `key_file` | -- | Path to the git-crypt key file. |
+| `key_file` | -- | Path to the git-crypt key file (required). For symmetric mode, use the exported key. For GPG mode, the value is unused -- pass any placeholder (e.g. `/dev/null`). |
 | `--manifest` | `git-recrypt.yaml` | Path to the manifest file. |
 | `--mode` | `fast` | Verification depth. `fast` or `full`. |
 

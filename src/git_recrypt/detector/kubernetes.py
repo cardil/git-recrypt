@@ -89,8 +89,9 @@ class KubernetesDetector(BaseDetector):
         ):
             return True
         if (repo_path / "values.yaml").exists():
-            yaml_count = sum(1 for _ in repo_path.glob(_YAML_GLOB))
-            if yaml_count > _PROFILE_YAML_THRESHOLD:
+            yaml_count = sum(1 for _ in repo_path.glob("**/*.yaml"))
+            yml_count = sum(1 for _ in repo_path.glob("**/*.yml"))
+            if yaml_count + yml_count > _PROFILE_YAML_THRESHOLD:
                 return True
         return False
 

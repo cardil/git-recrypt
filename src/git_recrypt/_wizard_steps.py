@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 import questionary
 from questionary import Choice
@@ -12,7 +12,6 @@ from rich.table import Table
 
 from git_recrypt.detector._registry import run_detection
 from git_recrypt.manifest import (
-    GpgGenerateConfig,
     GpgKeyConfig,
     KeyConfig,
     Manifest,
@@ -27,12 +26,11 @@ if TYPE_CHECKING:
 _console = Console()
 
 _PROFILES = ["generic", "etckeeper", "kubernetes"]
-_INTRO_CHOICES = ["root", "first-match", "specific SHA"]
+_INTRO_CHOICES = ["root"]
 _BRANCH_CHOICES = ["HEAD", "all", "specific"]
 _KEY_TYPE_CHOICES = ["symmetric", "gpg"]
 _SYM_MODE_CHOICES = ["generate", "provide existing"]
 _CONFLICT_CHOICES = ["overwrite", "merge", "save to different path"]
-_PASSPHRASE_CHOICES = ["provided", "random"]
 
 
 def _ask_str(q: questionary.Question, label: str) -> str:
@@ -140,48 +138,30 @@ def _step_symmetric_key() -> KeyConfig:
 
 
 def _step_gpg_key() -> KeyConfig:
-    raw_ids = _ask_str(
-        questionary.text(
-            "GPG user IDs (comma-separated, empty to generate):", default=""
-        ),
-        "GPG user IDs",
-    )
-    if raw_ids.strip():
-        user_ids = [uid.strip() for uid in raw_ids.split(",") if uid.strip()]
-        return KeyConfig(gpg=GpgKeyConfig(user_ids=user_ids))
-    _console.print(
-        "[yellow]Warning: GPG key generation is not yet implemented."
-        " The manifest will be created but 'run' will fail.[/yellow]"
-    )
-    passphrase_mode = _ask_str(
-        questionary.select(
-            "Passphrase mode for generated GPG key:",
-            choices=_PASSPHRASE_CHOICES,
-            default="provided",
-        ),
-        "GPG passphrase mode",
-    )
-    pm: Literal["provided", "random"] = (
-        "random" if passphrase_mode == "random" else "provided"  # noqa: S105
-    )
-    return KeyConfig(gpg=GpgKeyConfig(generate=GpgGenerateConfig(passphrase=pm)))
+    while True:
+        raw_ids = _ask_str(
+            questionary.text(
+                "GPG user IDs (comma-separated):", default=""
+            ),
+            "GPG user IDs",
+        )
+        if raw_ids.strip():
+            user_ids = [uid.strip() for uid in raw_ids.split(",") if uid.strip()]
+            if user_ids:
+                return KeyConfig(gpg=GpgKeyConfig(user_ids=user_ids))
+        _console.print(
+            "[red]At least one GPG user ID is required."
+            " GPG key generation is not yet implemented.[/red]"
+        )
 
 
 def step_introduce_at() -> str:
     """Step 5: Select introduction point."""
-    choice = _ask_str(
-        questionary.select(
-            "Introduce git-crypt at:", choices=_INTRO_CHOICES, default="root"
-        ),
-        "introduce_at",
+    _console.print(
+        "[dim]Note: Only 'root' is currently supported."
+        " 'first-match' and SHA-based introduction points are planned.[/dim]"
     )
-    if choice == "specific SHA":
-        sha = _ask_str(
-            questionary.text("Enter the 40-char commit SHA:"),
-            "SHA value",
-        )
-        return sha.strip()
-    return choice
+    return "root"
 
 
 def step_branches() -> list[str]:
@@ -200,10 +180,20 @@ def step_branches() -> list[str]:
         return ["HEAD"]
     if choice == "specific":
         raw = _ask_str(
-            questionary.text("Branch names (comma-separated):"),
-            "branch names",
+            questionary.text("Branch name:"),
+            "branch name",
         )
-        return [b.strip() for b in raw.split(",") if b.strip()]
+        branch = raw.strip()
+        if not branch:
+            _console.print("[yellow]Empty branch name. Falling back to HEAD.[/yellow]")
+            return ["HEAD"]
+        if "," in branch:
+            _console.print(
+                "[yellow]Multi-branch rewrite is planned but not yet supported."
+                " Using first branch only.[/yellow]"
+            )
+            branch = branch.split(",")[0].strip()
+        return [branch]
     return ["HEAD"]
 
 
