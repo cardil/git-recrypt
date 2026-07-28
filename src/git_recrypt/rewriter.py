@@ -132,6 +132,7 @@ class HistoryRewriter:
 
     def run(self) -> RewriteResult:
         """Execute the full rewrite pipeline."""
+        _assert_work_dir_safe(self._config.repo_path, self._config.work_dir)
         _assert_not_encrypted(self._config.repo_path, self._config.manifest)
         _assert_gpg_keys_available(self._config.manifest)
         self._branch = self._resolve_branch()
@@ -530,6 +531,26 @@ def _assert_gpg_keys_available(manifest: Manifest) -> None:
             " Import the secret key or use symmetric mode."
         ),
     )
+
+
+def _assert_work_dir_safe(repo: Path, work_dir: Path) -> None:
+    src = repo.resolve()
+    tgt = work_dir.resolve()
+    if src == tgt:
+        raise RewriteError(
+            phase="pre-check",
+            detail=f"Work directory '{tgt}' is the same as the source repo.",
+        )
+    if src in tgt.parents:
+        raise RewriteError(
+            phase="pre-check",
+            detail=f"Work directory '{tgt}' is inside the source repo '{src}'.",
+        )
+    if tgt in src.parents:
+        raise RewriteError(
+            phase="pre-check",
+            detail=f"Work directory '{tgt}' is a parent of the source repo '{src}'.",
+        )
 
 
 def _assert_not_encrypted(repo: Path, manifest: Manifest) -> None:

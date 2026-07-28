@@ -25,15 +25,17 @@ class CryptoEngine:
     """Wraps git-crypt clean/smudge for file encryption/decryption."""
 
     key_file: Path
+    _git_crypt_bin: str = ""
 
     def __post_init__(self) -> None:
         """Validate key file exists and git-crypt is available."""
         if not self.key_file.exists():
             raise CryptoError(detail=f"Key file not found: {self.key_file}")
         try:
-            find_git_crypt()
+            gc = find_git_crypt()
         except RuntimeError:
             raise CryptoError(detail="git-crypt binary not found in PATH")  # noqa: B904
+        object.__setattr__(self, "_git_crypt_bin", gc)
 
     def encrypt(self, plaintext: bytes) -> bytes:
         """Encrypt plaintext via git-crypt clean --key-file.
@@ -43,9 +45,6 @@ class CryptoEngine:
         with the GITCRYPT magic header.
         Raises CryptoError on subprocess failure.
         """
-        # Always invoke the clean filter -- it handles already-encrypted data.
-        # A prefix-only check could be fooled by crafted plaintext starting
-        # with the GITCRYPT magic header.
         return self._run_git_crypt("clean", plaintext)
 
     def decrypt(self, ciphertext: bytes) -> bytes:
@@ -64,7 +63,7 @@ class CryptoEngine:
     def _run_git_crypt(self, subcommand: str, input_data: bytes) -> bytes:
         """Run git-crypt clean/smudge as a subprocess pipe."""
         result = subprocess.run(  # noqa: S603
-            [find_git_crypt(), subcommand, "--key-file", str(self.key_file)],
+            [self._git_crypt_bin, subcommand, "--key-file", str(self.key_file)],
             input=input_data,
             capture_output=True,
             check=False,
@@ -154,9 +153,13 @@ def export_gpg_key(repo_path: Path) -> Path:
     tmp_fd, tmp_path_str = tempfile.mkstemp(prefix="gcri-gpg-key-", suffix=".key")
     os.close(tmp_fd)
     exported = Path(tmp_path_str)
-    _ = _run_cmd([gc, "export-key", str(exported)], cwd=repo_path)
-
+    try:
+        _ = _run_cmd([gc, "export-key", str(exported)], cwd=repo_path)
+    except Exception:
+        exported.unlink(missing_ok=True)
+        raise
     if not exported.exists() or exported.stat().st_size == 0:
+        exported.unlink(missing_ok=True)
         raise CryptoError(detail=f"Exported key file missing or empty: {exported}")
     return exported
 
