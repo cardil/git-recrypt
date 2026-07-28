@@ -54,7 +54,7 @@ def test_detect_with_fixture_repo(tmp_path: Path) -> None:
 def test_dry_run_with_manifest(tmp_path: Path) -> None:
     # Given a valid manifest file
     manifest_path = tmp_path / "git-recrypt.yaml"
-    manifest_path.write_text(_MINIMAL_MANIFEST, encoding="utf-8")
+    _ = manifest_path.write_text(_MINIMAL_MANIFEST, encoding="utf-8")
 
     # When invoking dry-run --manifest <path>
     result = runner.invoke(app, ["dry-run", "--manifest", str(manifest_path)])
@@ -122,11 +122,11 @@ def test_run_generate_symmetric_key(tmp_path: Path) -> None:
     # Given -- manifest with key_file: generate, mocked resolve_key_from_manifest
     export_to = tmp_path / "out.key"
     manifest_path = tmp_path / "git-recrypt.yaml"
-    manifest_path.write_text(
+    _ = manifest_path.write_text(
         _GENERATE_KEY_MANIFEST.format(export_to=str(export_to)), encoding="utf-8"
     )
     fake_key = tmp_path / "fake.key"
-    fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
+    _ = fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
 
     fake_result = MagicMock()
     fake_result.commits_rewritten = 0
@@ -153,9 +153,9 @@ def test_run_generate_symmetric_key(tmp_path: Path) -> None:
 def test_run_gpg_user_ids(tmp_path: Path) -> None:
     # Given -- manifest with gpg.user_ids, mocked resolve_key_from_manifest
     manifest_path = tmp_path / "git-recrypt.yaml"
-    manifest_path.write_text(_GPG_USER_IDS_MANIFEST, encoding="utf-8")
+    _ = manifest_path.write_text(_GPG_USER_IDS_MANIFEST, encoding="utf-8")
     fake_key = tmp_path / "gpg-exported.key"
-    fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
+    _ = fake_key.write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 138)
 
     fake_result = MagicMock()
     fake_result.commits_rewritten = 0

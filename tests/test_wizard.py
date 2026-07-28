@@ -522,7 +522,7 @@ def test_cancel_on_profile_raises(tmp_path: Path, mock_detection: MagicMock) -> 
         patch("questionary.text", return_value=_make_question("")),
         pytest.raises(KeyboardInterrupt),
     ):
-        run_wizard(tmp_path, output)
+        _ = run_wizard(tmp_path, output)
 
 
 # ---------------------------------------------------------------------------

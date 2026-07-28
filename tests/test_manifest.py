@@ -18,7 +18,7 @@ from git_recrypt.patterns import generate_gitattributes
 
 def _write_yaml(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "manifest.yaml"
-    p.write_text(content, encoding="utf-8")
+    _ = p.write_text(content, encoding="utf-8")
     return p
 
 
@@ -84,7 +84,7 @@ patterns:
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_wrong_version(tmp_path: Path) -> None:
@@ -102,7 +102,7 @@ patterns:
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_both_symmetric_and_gpg(tmp_path: Path) -> None:
@@ -123,7 +123,7 @@ patterns:
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_neither_symmetric_nor_gpg(tmp_path: Path) -> None:
@@ -139,7 +139,7 @@ patterns:
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_empty_patterns(tmp_path: Path) -> None:
@@ -156,7 +156,7 @@ patterns: []
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_introduce_at_root(tmp_path: Path) -> None:
@@ -195,7 +195,7 @@ introduce_at: first-match
     # When loading the manifest
     # Then ManifestError is raised with "not yet implemented" message
     with pytest.raises(ManifestError, match="not yet implemented"):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_introduce_at_valid_sha(tmp_path: Path) -> None:
@@ -216,7 +216,7 @@ introduce_at: "{sha}"
     # When loading the manifest
     # Then ManifestError is raised with "not yet implemented" message
     with pytest.raises(ManifestError, match="not yet implemented"):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_introduce_at_invalid(tmp_path: Path) -> None:
@@ -235,7 +235,7 @@ introduce_at: invalid
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def test_defaults_applied(tmp_path: Path) -> None:
@@ -295,7 +295,7 @@ def test_file_not_found(tmp_path: Path) -> None:
     # When loading the manifest
     # Then ManifestError is raised with the path
     with pytest.raises(ManifestError) as exc_info:
-        load_manifest(missing)
+        _ = load_manifest(missing)
 
     assert str(missing) in str(exc_info.value)
 
@@ -303,12 +303,12 @@ def test_file_not_found(tmp_path: Path) -> None:
 def test_invalid_yaml(tmp_path: Path) -> None:
     # Given a file with invalid YAML content
     path = tmp_path / "bad.yaml"
-    path.write_text("key: [unclosed bracket\n", encoding="utf-8")
+    _ = path.write_text("key: [unclosed bracket\n", encoding="utf-8")
 
     # When loading the manifest
     # Then ManifestError is raised
     with pytest.raises(ManifestError):
-        load_manifest(path)
+        _ = load_manifest(path)
 
 
 def _make_manifest(**overrides: object) -> Manifest:
@@ -396,7 +396,7 @@ def test_exclude_dir_style_rejected() -> None:
     # When generating gitattributes with a dir-style exclude pattern
     # Then ValueError is raised
     with pytest.raises(ValueError, match="ends with '/'"):
-        generate_gitattributes(["*.key"], exclude=["private/"])
+        _ = generate_gitattributes(["*.key"], exclude=["private/"])
 
 
 def test_include_dir_style_rejected() -> None:
@@ -404,4 +404,4 @@ def test_include_dir_style_rejected() -> None:
     # When generating gitattributes with a dir-style include pattern
     # Then ValueError is raised
     with pytest.raises(ValueError, match="ends with '/'"):
-        generate_gitattributes(["secrets/"])
+        _ = generate_gitattributes(["secrets/"])

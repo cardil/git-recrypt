@@ -13,16 +13,16 @@ from git_recrypt.detector.generic import GenericDetector
 @pytest.fixture
 def generic_repo(tmp_path: Path) -> Path:
     """Create a directory with various files for generic detection."""
-    (tmp_path / "server.key").write_text("private key content")
-    (tmp_path / ".env").write_text("DATABASE_URL=postgres://user:pass@host/db")
-    (tmp_path / "config.yaml").write_text("password: secret123")
-    (tmp_path / "id_rsa.pub").write_text("ssh-rsa AAAA...")  # should be excluded
-    (tmp_path / "README.md").write_text("# Project")
+    _ = (tmp_path / "server.key").write_text("private key content")
+    _ = (tmp_path / ".env").write_text("DATABASE_URL=postgres://user:pass@host/db")
+    _ = (tmp_path / "config.yaml").write_text("password: secret123")
+    _ = (tmp_path / "id_rsa.pub").write_text("ssh-rsa AAAA...")  # should be excluded
+    _ = (tmp_path / "README.md").write_text("# Project")
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "app.py").write_text("print('hello')")
+    _ = (tmp_path / "src" / "app.py").write_text("print('hello')")
     # Create .git dir to test it's skipped.
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".git" / "config").write_text("[core]")
+    _ = (tmp_path / ".git" / "config").write_text("[core]")
     return tmp_path
 
 
@@ -75,7 +75,7 @@ def test_excludes_pub_files(generic_repo: Path) -> None:
 def test_excludes_test_directories(tmp_path: Path) -> None:
     """Files under tests/ directories are excluded."""
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "secret.key").write_text("key content")
+    _ = (tmp_path / "tests" / "secret.key").write_text("key content")
 
     detector = GenericDetector()
     result = detector.detect(tmp_path)
@@ -117,7 +117,7 @@ def test_binary_files_skipped(tmp_path: Path) -> None:
     """Binary files are not scanned for content patterns."""
     binary_file = tmp_path / "data.bin"
     # Write binary content with null bytes and embedded 'password=' text.
-    binary_file.write_bytes(b"\x00\x01\x02password=secret\x00\xff\xfe")
+    _ = binary_file.write_bytes(b"\x00\x01\x02password=secret\x00\xff\xfe")
 
     detector = GenericDetector()
     result = detector.detect(tmp_path)

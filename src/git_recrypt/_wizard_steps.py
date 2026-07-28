@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 _console = Console()
 
 _PROFILES = ["generic", "etckeeper", "kubernetes"]
-_INTRO_CHOICES = ["root"]
 _BRANCH_CHOICES = ["HEAD", "all", "specific"]
 _KEY_TYPE_CHOICES = ["symmetric", "gpg"]
 _SYM_MODE_CHOICES = ["generate", "provide existing"]
@@ -183,16 +182,18 @@ def step_branches() -> list[str]:
             questionary.text("Branch name:"),
             "branch name",
         )
-        branch = raw.strip()
-        if not branch:
-            _console.print("[yellow]Empty branch name. Falling back to HEAD.[/yellow]")
+        branch = raw.strip() or "HEAD"
+        if not branch or branch == "HEAD":
+            if not raw.strip():
+                msg = "[yellow]Empty branch name. Falling back to HEAD.[/yellow]"
+                _console.print(msg)
             return ["HEAD"]
         if "," in branch:
             _console.print(
                 "[yellow]Multi-branch rewrite is planned but not yet supported."
                 " Using first branch only.[/yellow]"
             )
-            branch = branch.split(",")[0].strip()
+            branch = branch.split(",")[0].strip() or "HEAD"
         return [branch]
     return ["HEAD"]
 

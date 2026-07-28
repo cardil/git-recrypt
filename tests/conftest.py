@@ -34,7 +34,7 @@ _GIT_ENV = {
 
 def _run_git(args: list[str], cwd: Path) -> None:
     """Run a git subcommand in cwd with a deterministic author/committer env."""
-    subprocess.run(  # noqa: S603
+    _ = subprocess.run(  # noqa: S603
         [_GIT, *args],
         check=True,
         capture_output=True,
@@ -45,7 +45,7 @@ def _run_git(args: list[str], cwd: Path) -> None:
 
 def _run_git_crypt(args: list[str], cwd: Path) -> None:
     """Run a git-crypt subcommand in cwd."""
-    subprocess.run(  # noqa: S603
+    _ = subprocess.run(  # noqa: S603
         [_GIT_CRYPT, *args],
         check=True,
         capture_output=True,
@@ -71,20 +71,20 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     _run_git(["config", "user.name", "Test"], cwd=repo)
 
     # Initial commit with README.md
-    (repo / "README.md").write_text("# Test Repo\n")
+    _ = (repo / "README.md").write_text("# Test Repo\n")
     _run_git(["add", "README.md"], cwd=repo)
     _run_git(["commit", "-m", "Initial commit"], cwd=repo)
 
     # Second commit: add secrets/api.key and .env
     secrets_dir = repo / "secrets"
     secrets_dir.mkdir()
-    (secrets_dir / "api.key").write_text("API_KEY=super-secret-value\n")
-    (repo / ".env").write_text("DATABASE_URL=postgres://user:pass@localhost/db\n")
+    _ = (secrets_dir / "api.key").write_text("API_KEY=super-secret-value\n")
+    _ = (repo / ".env").write_text("DATABASE_URL=postgres://user:pass@localhost/db\n")
     _run_git(["add", "."], cwd=repo)
     _run_git(["commit", "-m", "Add secrets"], cwd=repo)
 
     # Third commit: modify .env
-    (repo / ".env").write_text(
+    _ = (repo / ".env").write_text(
         "DATABASE_URL=postgres://user:pass@localhost/db\nSECRET_KEY=another-secret\n"
     )
     _run_git(["add", ".env"], cwd=repo)
@@ -107,7 +107,7 @@ def sample_key_file(tmp_path: Path) -> Path:
     _run_git(["config", "user.name", "Test"], cwd=repo)
 
     # git-crypt requires at least one commit
-    (repo / "README.md").write_text("# Key Repo\n")
+    _ = (repo / "README.md").write_text("# Key Repo\n")
     _run_git(["add", "README.md"], cwd=repo)
     _run_git(["commit", "-m", "init"], cwd=repo)
 

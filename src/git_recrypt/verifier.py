@@ -78,6 +78,7 @@ class RewriteVerifier:
     _gpg_user_ids: list[str]  # pyright: ignore[reportRedeclaration]
     _rewrite_commits: int
     _rewrite_files_encrypted: int
+    _branch: str
 
     def __init__(  # noqa: PLR0913
         self,
@@ -88,6 +89,7 @@ class RewriteVerifier:
         mode: VerifyMode = VerifyMode.FAST,
         rewrite_commits: int = 0,
         rewrite_files_encrypted: int = 0,
+        branch: str = "",
     ) -> None:
         """Initialize the verifier."""
         self._original_path = original_path
@@ -99,6 +101,7 @@ class RewriteVerifier:
         self._gpg_user_ids: list[str] = []
         self._rewrite_commits = rewrite_commits
         self._rewrite_files_encrypted = rewrite_files_encrypted
+        self._branch = branch
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         """Set an optional (current, total) progress callback."""
@@ -124,11 +127,15 @@ class RewriteVerifier:
         is_gpg = bool(self._gpg_user_ids)
         preflight_key: Path | None = None if is_gpg else self._key_file
 
-        original_commits = get_commit_list(self._original_path)
+        original_commits = get_commit_list(
+            self._original_path, self._branch or None
+        )
         commits_total = len(original_commits)
 
         try:
-            pairs = build_commit_pairs(original_commits, self._rewritten_path)
+            pairs = build_commit_pairs(
+                original_commits, self._rewritten_path, self._original_path
+            )
         except ValueError as exc:
             return VerifyResult(
                 passed=False,
@@ -257,7 +264,15 @@ class RewriteVerifier:
 
         source_tmpdir = tempfile.mkdtemp(prefix="gcri-src-")
         source_copy = Path(source_tmpdir)
-        _ = shutil.copytree(self._original_path, source_copy, dirs_exist_ok=True)
+        clone_result = subprocess.run(  # noqa: S603
+            [GIT, "clone", "--local", "--no-hardlinks", "--no-checkout",
+             str(self._original_path), str(source_copy)],
+            capture_output=True, check=False,
+        )
+        if clone_result.returncode != 0:
+            shutil.rmtree(source_tmpdir, ignore_errors=True)
+            stderr = clone_result.stderr.decode(errors="replace")
+            return [f"source clone failed: {stderr.strip()}"], 0, 0
         try:
             for idx, (orig_sha, rew_sha) in enumerate(pairs_to_check):
                 if self._progress_cb is not None:

@@ -24,6 +24,7 @@ def build_verifier(  # noqa: PLR0913
     mode: VerifyMode = VerifyMode.FAST,
     rewrite_commits: int = 0,
     rewrite_files_encrypted: int = 0,
+    branch: str = "",
 ) -> RewriteVerifier | None:
     """Build a RewriteVerifier from a manifest object, or None if invalid."""
     from git_recrypt.manifest import Manifest  # noqa: PLC0415
@@ -34,6 +35,7 @@ def build_verifier(  # noqa: PLR0913
         include_patterns=tuple(m.patterns),
         exclude_patterns=tuple(m.exclude),
     )
+    resolved_branch = branch or (m.branches[0] if m.branches else "")
     verifier = RewriteVerifier(
         original_path=original,
         rewritten_path=rewritten,
@@ -42,6 +44,7 @@ def build_verifier(  # noqa: PLR0913
         mode=mode,
         rewrite_commits=rewrite_commits,
         rewrite_files_encrypted=rewrite_files_encrypted,
+        branch=resolved_branch,
     )
     if m.key.gpg is not None and m.key.gpg.user_ids is not None:
         verifier.set_gpg_user_ids(m.key.gpg.user_ids)

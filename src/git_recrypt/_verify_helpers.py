@@ -187,12 +187,13 @@ def _test_lock_unlock_roundtrip(
 def build_commit_pairs(
     original_commits: list[str],
     rewritten_path: Path,
+    source_repo: Path | None = None,
 ) -> list[tuple[str, str]]:
     """Build (original, rewritten) SHA pairs using git-filter-repo commit map.
 
     Raises ValueError if commit map is missing or empty.
     """
-    commit_map = load_commit_map(rewritten_path)
+    commit_map = load_commit_map(rewritten_path, source_repo)
     if not commit_map:
         msg = "No commit map found"
         raise ValueError(msg)

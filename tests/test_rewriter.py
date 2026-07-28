@@ -161,7 +161,7 @@ def test_encrypt_idempotent(
         work_dir=tmp_path / "work2",
     )
     with pytest.raises(RewriteError, match="encrypted files"):
-        HistoryRewriter(config).run()
+        _ = HistoryRewriter(config).run()
 
 
 def test_rewrite_result_has_counts(
@@ -248,4 +248,4 @@ def test_gpg_mode_fails_when_no_secret_key_available(
 
     # When/Then: run() raises RewriteError about missing GPG secret key
     with pytest.raises(RewriteError, match=r"(?i)gpg.*secret"):
-        HistoryRewriter(config).run()
+        _ = HistoryRewriter(config).run()

@@ -30,24 +30,7 @@ jobs:
         run: uv run ruff check src/ tests/
 
       - name: Type check (basedpyright)
-        run: |
-          set +e
-          output=$(uv run basedpyright src/ tests/ 2>&1)
-          exit_code=$?
-          set -e
-          echo "$output"
-          if [ -z "$output" ]; then
-            echo "::error::basedpyright produced no output (possible crash)"
-            exit 1
-          fi
-          if echo "$output" | grep -qE '^[1-9][0-9]* errors?'; then
-            echo "::error::basedpyright found errors"
-            exit 1
-          fi
-          if [ $exit_code -ne 0 ]; then
-            echo "::error::basedpyright exited with code $exit_code"
-            exit $exit_code
-          fi
+        run: uv run basedpyright src/ tests/
 
       - name: Test (pytest)
         run: uv run pytest tests/ -q --no-header

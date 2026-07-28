@@ -124,7 +124,7 @@ def run(
         _console.print(f"Repository: {repo_path}")
         _console.print(f"Will rewrite [bold]{len(m.patterns)}[/bold] pattern(s)")
         _console.print(f"Work directory: {resolved_work_dir}")
-        typer.confirm("Proceed with rewrite?", abort=True)
+        _ = typer.confirm("Proceed with rewrite?", abort=True)
 
     try:
         key_file, key_msg = resolve_key_from_manifest(m.key, repo_path)

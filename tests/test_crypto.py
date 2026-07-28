@@ -51,7 +51,7 @@ def test_missing_key_file_raises(tmp_path: Path) -> None:
     missing = tmp_path / "does_not_exist.key"
     # When / Then
     with pytest.raises(CryptoError, match="Key file not found"):
-        CryptoEngine(key_file=missing)
+        _ = CryptoEngine(key_file=missing)
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ def test_roundtrip_decrypt(sample_key_file: Path) -> None:
 
 
 def test_encrypt_always_runs_clean(sample_key_file: Path) -> None:
-    """Given already-encrypted data, encrypt always invokes the clean filter.
+    """Encrypt always invokes the clean filter, even on already-encrypted data.
 
     git-crypt clean is not idempotent (re-encrypting produces different bytes),
     but the roundtrip decrypt(encrypt(plaintext)) must still recover the original.
@@ -94,10 +94,12 @@ def test_encrypt_always_runs_clean(sample_key_file: Path) -> None:
     engine = CryptoEngine(key_file=sample_key_file)
     plaintext = b"always-clean test"
     encrypted_once = engine.encrypt(plaintext)
-    # When
-    decrypted = engine.decrypt(encrypted_once)
-    # Then
-    assert decrypted == plaintext
+    # When: decrypt then re-encrypt (simulating a file that was already encrypted)
+    decrypted_once = engine.decrypt(encrypted_once)
+    encrypted_twice = engine.encrypt(decrypted_once)
+    # Then: re-encryption produces valid ciphertext (decryptable to original)
+    decrypted_twice = engine.decrypt(encrypted_twice)
+    assert decrypted_twice == plaintext
 
 
 def test_empty_file_roundtrip(sample_key_file: Path) -> None:
@@ -170,7 +172,7 @@ def test_generate_symmetric_key_invalid_path(tmp_path: Path) -> None:
     export_to = tmp_path / "nonexistent_dir" / "key.key"
     # When / Then
     with pytest.raises(CryptoError):
-        generate_symmetric_key(export_to)
+        _ = generate_symmetric_key(export_to)
 
 
 def test_generate_symmetric_key_returns_path(tmp_path: Path) -> None:
@@ -192,7 +194,7 @@ def test_generate_symmetric_key_no_git_crypt(tmp_path: Path) -> None:
         ),
         pytest.raises(CryptoError, match="git-crypt not found"),
     ):
-        generate_symmetric_key(export_to)
+        _ = generate_symmetric_key(export_to)
 
 
 def test_generate_symmetric_key_command_fails(tmp_path: Path) -> None:
@@ -209,4 +211,4 @@ def test_generate_symmetric_key_command_fails(tmp_path: Path) -> None:
         patch("git_recrypt.crypto.subprocess.run", return_value=failed),
         pytest.raises(CryptoError),
     ):
-        generate_symmetric_key(export_to)
+        _ = generate_symmetric_key(export_to)

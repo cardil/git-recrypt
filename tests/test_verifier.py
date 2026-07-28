@@ -34,7 +34,7 @@ _GIT_ENV: Final[dict[str, str]] = {
 
 
 def _run(args: list[str], cwd: Path) -> None:
-    subprocess.run(  # noqa: S603
+    _ = subprocess.run(  # noqa: S603
         args,
         check=True,
         capture_output=True,
@@ -44,7 +44,7 @@ def _run(args: list[str], cwd: Path) -> None:
 
 
 def _run_git_crypt(args: list[str], cwd: Path) -> None:
-    subprocess.run(  # noqa: S603
+    _ = subprocess.run(  # noqa: S603
         [_GIT_CRYPT, *args],
         check=True,
         capture_output=True,
@@ -59,10 +59,10 @@ def _make_single_commit_repo(tmp_path: Path, name: str) -> Path:
     _run([_GIT, "config", "user.email", "test@example.com"], cwd=repo)
     _run([_GIT, "config", "user.name", "Test"], cwd=repo)
 
-    (repo / "README.md").write_text("# Test\n")
+    _ = (repo / "README.md").write_text("# Test\n")
     secrets = repo / "secrets"
     secrets.mkdir()
-    (secrets / "api.key").write_text("API_KEY=super-secret\n")
+    _ = (secrets / "api.key").write_text("API_KEY=super-secret\n")
     _run([_GIT, "add", "."], cwd=repo)
     _run([_GIT, "commit", "-m", "Initial commit"], cwd=repo)
     return repo
@@ -101,7 +101,7 @@ def _write_commit_map(original: Path, rewritten: Path) -> None:
     lines = ["old                                      new\n"]
     for o, r in zip(orig_shas, rew_shas, strict=True):
         lines.append(f"{o} {r}\n")
-    (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
+    _ = (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
 
 
 def _make_rewritten_repo(
@@ -125,14 +125,14 @@ def _make_rewritten_repo(
             continue
         content = full.read_bytes()
         encrypted = crypto.encrypt(content)
-        full.write_bytes(encrypted)
+        _ = full.write_bytes(encrypted)
         _run([_GIT, "add", filepath], cwd=dest)
 
     gitattributes_lines = [
         f"{fp} filter=git-crypt diff=git-crypt" for fp in files_to_encrypt
     ]
     gitattributes_lines.append(".gitattributes !filter !diff")
-    (dest / ".gitattributes").write_text("\n".join(gitattributes_lines) + "\n")
+    _ = (dest / ".gitattributes").write_text("\n".join(gitattributes_lines) + "\n")
     _run([_GIT, "add", ".gitattributes"], cwd=dest)
     _run([_GIT, "commit", "--amend", "--no-edit"], cwd=dest)
 
@@ -153,7 +153,7 @@ def _make_gcrypt_repo_no_encrypted_files(
     """
     _clone_and_setup(original, dest)
 
-    (dest / ".gitattributes").write_text(
+    _ = (dest / ".gitattributes").write_text(
         "secrets/api.key filter=git-crypt diff=git-crypt\n"
         ".gitattributes !filter !diff\n"
     )
@@ -184,7 +184,7 @@ def _make_gcrypt_repo_no_patterns(
 ) -> None:
     """Clone original, add .gitattributes with no encrypt patterns, unlock, lock."""
     _clone_and_setup(original, dest)
-    (dest / ".gitattributes").write_text(".gitattributes !filter !diff\n")
+    _ = (dest / ".gitattributes").write_text(".gitattributes !filter !diff\n")
     _run([_GIT, "add", ".gitattributes"], cwd=dest)
     _run([_GIT, "commit", "--amend", "--no-edit"], cwd=dest)
     _run_git_crypt(["unlock", str(key_file)], cwd=dest)
@@ -291,10 +291,10 @@ def test_missing_gitattributes_detected(sample_key_file: Path, tmp_path: Path) -
     _run([_GIT, "init"], cwd=original)
     _run([_GIT, "config", "user.email", "test@example.com"], cwd=original)
     _run([_GIT, "config", "user.name", "Test"], cwd=original)
-    (original / "README.md").write_text("# Test\n")
+    _ = (original / "README.md").write_text("# Test\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 1"], cwd=original)
-    (original / "README.md").write_text("# Updated\n")
+    _ = (original / "README.md").write_text("# Updated\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 2"], cwd=original)
 
@@ -320,7 +320,7 @@ def test_missing_gitattributes_detected(sample_key_file: Path, tmp_path: Path) -
     lines = ["old                                      new\n"]
     for o, r in zip(orig_shas, rew_shas, strict=False):
         lines.append(f"{o} {r}\n")
-    (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
+    _ = (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
 
     matcher = PatternMatcher(include_patterns=(), exclude_patterns=())
     verifier = RewriteVerifier(
@@ -417,16 +417,16 @@ def test_fast_mode_samples_commits(sample_key_file: Path, tmp_path: Path) -> Non
 
     secrets = original / "secrets"
     secrets.mkdir()
-    (secrets / "api.key").write_text("API_KEY=secret\n")
-    (original / "README.md").write_text("# Test\n")
+    _ = (secrets / "api.key").write_text("API_KEY=secret\n")
+    _ = (original / "README.md").write_text("# Test\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 1"], cwd=original)
 
-    (secrets / "api.key").write_text("API_KEY=updated\n")
+    _ = (secrets / "api.key").write_text("API_KEY=updated\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 2"], cwd=original)
 
-    (original / "README.md").write_text("# Updated\n")
+    _ = (original / "README.md").write_text("# Updated\n")
     _run([_GIT, "add", "."], cwd=original)
     _run([_GIT, "commit", "-m", "commit 3"], cwd=original)
 

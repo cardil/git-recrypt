@@ -284,7 +284,7 @@ def test_already_encrypted_rejected(
         work_dir=tmp_path / "work2",
     )
     with pytest.raises(RewriteError, match="encrypted files"):
-        HistoryRewriter(config).run()
+        _ = HistoryRewriter(config).run()
 
 
 # ---------------------------------------------------------------------------

@@ -15,34 +15,36 @@ from git_recrypt.detector.etckeeper import EtcKeeperDetector
 
 @pytest.fixture
 def etckeeper_repo(tmp_path: Path) -> Path:
-    (tmp_path / ".etckeeper").write_text("")
-    (tmp_path / "passwd").write_text("root:x:0:0::/root:/bin/bash")
-    (tmp_path / "shadow").write_text("root:$6$hash:19000:0:99999:7:::")
-    (tmp_path / "gshadow").write_text("root:::root")
+    _ = (tmp_path / ".etckeeper").write_text("")
+    _ = (tmp_path / "passwd").write_text("root:x:0:0::/root:/bin/bash")
+    _ = (tmp_path / "shadow").write_text("root:$6$hash:19000:0:99999:7:::")
+    _ = (tmp_path / "gshadow").write_text("root:::root")
     ssh_dir = tmp_path / "ssh"
     ssh_dir.mkdir()
-    (ssh_dir / "ssh_host_ed25519_key").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    (ssh_dir / "ssh_host_ed25519_key.pub").write_text("ssh-ed25519 AAAA...")
+    _ = (ssh_dir / "ssh_host_ed25519_key").write_text(
+        "-----BEGIN OPENSSH PRIVATE KEY-----"
+    )
+    _ = (ssh_dir / "ssh_host_ed25519_key.pub").write_text("ssh-ed25519 AAAA...")
     mysql_dir = tmp_path / "mysql"
     mysql_dir.mkdir()
-    (mysql_dir / "debian.cnf").write_text("[client]\npassword = secret123\n")
-    (tmp_path / "hostname").write_text("myserver")
+    _ = (mysql_dir / "debian.cnf").write_text("[client]\npassword = secret123\n")
+    _ = (tmp_path / "hostname").write_text("myserver")
     return tmp_path
 
 
 def test_matches_profile_with_etckeeper_file(tmp_path: Path) -> None:
-    (tmp_path / ".etckeeper").write_text("")
+    _ = (tmp_path / ".etckeeper").write_text("")
     assert EtcKeeperDetector.matches_profile(tmp_path) is True
 
 
 def test_matches_profile_with_passwd_shadow(tmp_path: Path) -> None:
-    (tmp_path / "passwd").write_text("root:x:0:0::/root:/bin/bash")
-    (tmp_path / "shadow").write_text("root:$6$hash:19000:0:99999:7:::")
+    _ = (tmp_path / "passwd").write_text("root:x:0:0::/root:/bin/bash")
+    _ = (tmp_path / "shadow").write_text("root:$6$hash:19000:0:99999:7:::")
     assert EtcKeeperDetector.matches_profile(tmp_path) is True
 
 
 def test_matches_profile_false_for_generic(tmp_path: Path) -> None:
-    (tmp_path / "README.md").write_text("# project")
+    _ = (tmp_path / "README.md").write_text("# project")
     assert EtcKeeperDetector.matches_profile(tmp_path) is False
 
 

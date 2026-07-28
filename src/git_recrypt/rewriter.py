@@ -323,7 +323,13 @@ class HistoryRewriter:
 
 
 def _merge_source_gitattributes(src: Path, tgt: Path, sha: str) -> None:
-    """Merge non-git-crypt lines from source .gitattributes at sha into target."""
+    """Merge non-git-crypt lines from source .gitattributes at sha into target.
+
+    Rebuilds the non-git-crypt portion from scratch each commit so that
+    deletions in the source repo are reflected in the rewritten repo.
+    Skips any source line that sets filter or diff attributes to prevent
+    overriding git-crypt encryption.
+    """
     try:
         raw = _run(["show", f"{sha}:.gitattributes"], src)
         src_lines = raw.decode(errors="replace").splitlines()
@@ -332,20 +338,28 @@ def _merge_source_gitattributes(src: Path, tgt: Path, sha: str) -> None:
         return
     ga = tgt / ".gitattributes"
     existing = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
-    existing_set = set(existing)
-    added = False
+    crypt_lines = [
+        line for line in existing
+        if "filter=git-crypt" in line or "diff=git-crypt" in line
+    ]
+    filtered_src: list[str] = []
     for line in src_lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            filtered_src.append(line)
             continue
         if "filter=git-crypt" in stripped or "diff=git-crypt" in stripped:
             continue
-        if stripped not in existing_set:
-            existing.append(line)
-            existing_set.add(stripped)
-            added = True
-    if added:
-        _ = ga.write_text("\n".join(existing) + "\n", encoding="utf-8")
+        parts = stripped.split()
+        if len(parts) > 1 and any(
+            attr in {"filter", "-filter", "!filter", "diff", "-diff", "!diff"}
+            or attr.startswith(("filter=", "diff="))
+            for attr in parts[1:]
+        ):
+            continue
+        filtered_src.append(line)
+    merged = crypt_lines + filtered_src
+    _ = ga.write_text("\n".join(merged) + "\n", encoding="utf-8")
 
 
 def _dump_debug_patch(src: Path, sha: str, patch: bytes) -> None:

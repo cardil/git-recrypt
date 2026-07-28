@@ -61,7 +61,7 @@ def test_detection_result_frozen() -> None:
 
 def test_base_detector_not_instantiable() -> None:
     with pytest.raises(TypeError):
-        BaseDetector()  # type: ignore[abstract]  # pyright: ignore[reportAbstractUsage]
+        _ = BaseDetector()  # type: ignore[abstract]  # pyright: ignore[reportAbstractUsage]
 
 
 def test_detected_secret_equal_instances_deduplicate() -> None:
