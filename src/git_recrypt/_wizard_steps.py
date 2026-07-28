@@ -139,7 +139,7 @@ def _step_symmetric_key() -> KeyConfig:
             questionary.path("Path to existing key file:"),
             "key file path",
         )
-        resolved = str(Path(key_path).resolve())
+        resolved = str(Path(key_path).expanduser().resolve())
         return KeyConfig(symmetric=SymmetricKeyConfig(key_file=resolved))
     return KeyConfig(symmetric=SymmetricKeyConfig(key_file="generate"))
 

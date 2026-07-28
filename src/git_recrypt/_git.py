@@ -44,7 +44,7 @@ def get_commit_list(repo_path: Path, branch: str | None = None) -> list[str]:
     """
     cmd = [_GIT, "rev-list"]
     if branch is not None:
-        cmd.extend(["--", branch])
+        cmd.append(branch)
     else:
         cmd.append("--all")
     result = subprocess.run(  # noqa: S603

@@ -89,7 +89,7 @@ def load_setup_commits(state_dir: Path) -> list[str]:
         return []
     try:
         parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return []
     if not isinstance(parsed, list):
         return []

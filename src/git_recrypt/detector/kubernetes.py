@@ -14,11 +14,11 @@ from git_recrypt.detector.base import (
 )
 
 K8S_SECRET_PATTERNS: Final[dict[str, re.Pattern[str]]] = {
-    "kind_secret": re.compile(r"^\s*kind:\s*Secret\s*(#.*)?$", re.MULTILINE),
+    "kind_secret": re.compile(r"^\s*kind:\s*Secret\s*(\s#.*)?$", re.MULTILINE),
     "type_opaque": re.compile(
-        r"^\s*type:\s*(Opaque|kubernetes\.io/.*)\s*(#.*)?$", re.MULTILINE
+        r"^\s*type:\s*(Opaque|kubernetes\.io/.*)\s*(\s#.*)?$", re.MULTILINE
     ),
-    "string_data": re.compile(r"^\s*stringData:\s*(#.*)?$", re.MULTILINE),
+    "string_data": re.compile(r"^\s*stringData:\s*(\s#.*)?$", re.MULTILINE),
 }
 
 _YAML_GLOB = "**/*.yaml"

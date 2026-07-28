@@ -21,6 +21,7 @@ from git_recrypt._verify_commits import (
     verify_commit_checkout,
 )
 from git_recrypt._verify_helpers import (
+    PreflightResult,
     build_commit_pairs,
     run_preflight,
 )
@@ -110,7 +111,7 @@ class RewriteVerifier:
         """Set GPG user IDs for identity verification in Phase 2/3."""
         self._gpg_user_ids = list(user_ids)
 
-    def verify(self) -> VerifyResult:  # noqa: C901
+    def verify(self) -> VerifyResult:  # noqa: C901, PLR0912
         """Run preflight phases then commit-level verification."""
         rewrite_errors = self._check_rewrite_report()
         if rewrite_errors:
@@ -186,8 +187,9 @@ class RewriteVerifier:
         all_errors: list[str] = []
         total_files = 0
         commits_checked = 0
+        preflight_result: PreflightResult | None = None
         try:
-            preflight = run_preflight(
+            preflight_result = run_preflight(
                 rewritten_path=self._rewritten_path,
                 matcher=self._matcher,
                 key_file=preflight_key,
@@ -196,27 +198,18 @@ class RewriteVerifier:
                 branch=self._branch,
             )
 
-            if not preflight.passed:
-                return VerifyResult(
-                    passed=False,
-                    commits_verified=0,
-                    commits_total=commits_total,
-                    files_verified=0,
-                    encrypted_files=(),
-                    errors=preflight.errors,
-                    encrypted_files_count=preflight.encrypted_files_count,
-                    identities_verified=preflight.identities_verified,
+            if preflight_result.passed:
+                pairs_to_check = (
+                    self._select_fast_sample(pairs)
+                    if self._mode == VerifyMode.FAST
+                    else pairs
                 )
 
-            pairs_to_check = (
-                self._select_fast_sample(pairs)
-                if self._mode == VerifyMode.FAST
-                else pairs
-            )
-
-            all_errors, total_files, commits_checked = self._run_commit_verification(
-                pairs_to_check
-            )
+                all_errors, total_files, commits_checked = (
+                    self._run_commit_verification(pairs_to_check)
+                )
+            else:
+                all_errors.extend(preflight_result.errors)
         finally:
             if orig_ref:
                 _ = subprocess.run(  # noqa: S603
@@ -233,6 +226,12 @@ class RewriteVerifier:
                 if "already locked" not in str(exc):
                     all_errors.append(f"Post-verify lock failed: {exc}")
 
+        preflight_enc = (
+            preflight_result.encrypted_files_count if preflight_result else 0
+        )
+        preflight_ids = (
+            preflight_result.identities_verified if preflight_result else 0
+        )
         return VerifyResult(
             passed=len(all_errors) == 0,
             commits_verified=commits_checked,
@@ -240,8 +239,8 @@ class RewriteVerifier:
             files_verified=total_files,
             encrypted_files=(),
             errors=tuple(all_errors),
-            encrypted_files_count=preflight.encrypted_files_count,
-            identities_verified=preflight.identities_verified,
+            encrypted_files_count=preflight_enc,
+            identities_verified=preflight_ids,
         )
 
     def _check_rewrite_report(self) -> list[str]:
