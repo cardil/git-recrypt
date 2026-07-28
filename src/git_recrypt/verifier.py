@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import random
 import shutil
 import subprocess
@@ -111,7 +110,7 @@ class RewriteVerifier:
         """Set GPG user IDs for identity verification in Phase 2/3."""
         self._gpg_user_ids = list(user_ids)
 
-    def verify(self) -> VerifyResult:
+    def verify(self) -> VerifyResult:  # noqa: C901
         """Run preflight phases then commit-level verification."""
         rewrite_errors = self._check_rewrite_report()
         if rewrite_errors:
@@ -184,6 +183,9 @@ class RewriteVerifier:
         except OSError:
             pass
 
+        all_errors: list[str] = []
+        total_files = 0
+        commits_checked = 0
         try:
             preflight = run_preflight(
                 rewritten_path=self._rewritten_path,
@@ -191,6 +193,7 @@ class RewriteVerifier:
                 key_file=preflight_key,
                 gpg_user_ids=self._gpg_user_ids,
                 lock_unlock_shas=lock_unlock_shas,
+                branch=self._branch,
             )
 
             if not preflight.passed:
@@ -224,8 +227,11 @@ class RewriteVerifier:
                 )
             from git_recrypt._git import run_git_crypt_lock  # noqa: PLC0415
 
-            with contextlib.suppress(CryptoError):
+            try:
                 run_git_crypt_lock(self._rewritten_path)
+            except CryptoError as exc:
+                if "already locked" not in str(exc):
+                    all_errors.append(f"Post-verify lock failed: {exc}")
 
         return VerifyResult(
             passed=len(all_errors) == 0,

@@ -61,7 +61,7 @@ def load_commit_map_from_state(state_dir: Path) -> dict[str, str]:
         return {}
     try:
         parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
     if not isinstance(parsed, dict):
         return {}
@@ -119,7 +119,7 @@ def load_config(state_dir: Path) -> StateConfig | None:
         return None
     try:
         parsed: object = json.loads(path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return None
     if not isinstance(parsed, dict):
         return None

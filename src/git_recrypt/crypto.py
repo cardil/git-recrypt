@@ -259,13 +259,11 @@ def resolve_key_from_manifest(
     if key_config.symmetric is not None:
         kf = key_config.symmetric.key_file
         if kf == "generate":
-            export_to = Path(key_config.symmetric.export_to).resolve()
-            repo_resolved = _repo_path.resolve()
-            if repo_resolved in export_to.parents or export_to == repo_resolved:
-                from git_recrypt._state import state_dir_for_repo  # noqa: PLC0415
-                safe_dir = state_dir_for_repo(_repo_path)
-                safe_dir.mkdir(parents=True, exist_ok=True)
-                export_to = safe_dir / "git-crypt.key"
+            from git_recrypt._state import state_dir_for_repo  # noqa: PLC0415
+
+            safe_dir = state_dir_for_repo(_repo_path)
+            safe_dir.mkdir(parents=True, exist_ok=True)
+            export_to = safe_dir / "git-crypt.key"
             key_path = generate_symmetric_key(export_to)
             return key_path, f"Generated symmetric key: {key_path}"
         key_path = Path(kf)

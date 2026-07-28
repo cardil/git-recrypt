@@ -52,6 +52,12 @@ class GpgKeyConfig(BaseModel):
         if self.user_ids is not None and len(self.user_ids) == 0:
             msg = "'user_ids' must not be empty; provide at least one GPG user ID"
             raise ValueError(msg)
+        if self.generate is not None:
+            msg = (
+                "'key.gpg.generate' is not yet implemented."
+                " Use 'key.gpg.user_ids' with pre-existing GPG keys instead."
+            )
+            raise ValueError(msg)
         return self
 
 
@@ -122,6 +128,24 @@ class Manifest(BaseModel):
                     " are planned but not yet implemented."
                 )
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_pattern_format(self) -> Manifest:
+        for p in self.patterns:
+            if p.endswith("/"):
+                msg = (
+                    f"Pattern '{p}' ends with '/'. Directory-style patterns are not"
+                    f" supported by gitattributes. Use '{p}**' or '{p}*' instead."
+                )
+                raise ValueError(msg)
+        for p in self.exclude:
+            if p.endswith("/"):
+                msg = (
+                    f"Exclude pattern '{p}' ends with '/'. Directory-style patterns"
+                    f" are not supported. Use '{p}**' or '{p}*' instead."
+                )
+                raise ValueError(msg)
         return self
 
     @model_validator(mode="after")

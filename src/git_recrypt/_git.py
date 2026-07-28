@@ -18,7 +18,10 @@ if TYPE_CHECKING:
 
 def _get_gpg() -> str:
     """Lazy GPG binary resolution -- only called in GPG-specific functions."""
-    return find_gpg()
+    try:
+        return find_gpg()
+    except RuntimeError:
+        raise CryptoError(detail="gpg not found in PATH")  # noqa: B904
 
 
 def _get_git_crypt() -> str:
@@ -41,7 +44,7 @@ def get_commit_list(repo_path: Path, branch: str | None = None) -> list[str]:
     """
     cmd = [_GIT, "rev-list"]
     if branch is not None:
-        cmd.append(branch)
+        cmd.extend(["--", branch])
     else:
         cmd.append("--all")
     result = subprocess.run(  # noqa: S603
@@ -273,7 +276,7 @@ def export_gpg_secret_key(user_id: str, output_path: Path) -> None:
         CryptoError: If gpg export fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_get_gpg(), "--export-secret-keys", "--armor", user_id],
+        [_get_gpg(), "--export-secret-keys", "--armor", "--", user_id],
         capture_output=True,
         check=False,
     )
@@ -282,6 +285,10 @@ def export_gpg_secret_key(user_id: str, output_path: Path) -> None:
         raise CryptoError(
             detail=f"gpg --export-secret-keys failed for {user_id}",
             stderr=stderr_str,
+        )
+    if not result.stdout:
+        raise CryptoError(
+            detail=f"gpg exported no secret key for {user_id}",
         )
     _ = output_path.write_bytes(result.stdout)
 
@@ -297,7 +304,7 @@ def import_gpg_key(key_path: Path, gnupghome: Path) -> None:
         CryptoError: If gpg import fails.
     """
     result = subprocess.run(  # noqa: S603
-        [_get_gpg(), "--homedir", str(gnupghome), "--import", str(key_path)],
+        [_get_gpg(), "--homedir", str(gnupghome), "--import", "--", str(key_path)],
         capture_output=True,
         check=False,
     )

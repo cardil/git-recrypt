@@ -105,7 +105,14 @@ def step_patterns(detection: DetectionResult) -> list[str]:
         )
         if not custom.strip():
             break
-        patterns.append(custom.strip())
+        stripped = custom.strip()
+        if stripped.endswith("/"):
+            _console.print(
+                f"[red]'{stripped}' ends with '/'. "
+                f"Use '{stripped}**' or '{stripped}*' instead.[/red]"
+            )
+            continue
+        patterns.append(stripped)
     return patterns
 
 
@@ -132,7 +139,8 @@ def _step_symmetric_key() -> KeyConfig:
             questionary.path("Path to existing key file:"),
             "key file path",
         )
-        return KeyConfig(symmetric=SymmetricKeyConfig(key_file=key_path))
+        resolved = str(Path(key_path).resolve())
+        return KeyConfig(symmetric=SymmetricKeyConfig(key_file=resolved))
     return KeyConfig(symmetric=SymmetricKeyConfig(key_file="generate"))
 
 
@@ -209,7 +217,14 @@ def step_exclusions() -> list[str]:
         )
         if not pattern.strip():
             break
-        excludes.append(pattern.strip())
+        stripped = pattern.strip()
+        if stripped.endswith("/"):
+            _console.print(
+                f"[red]'{stripped}' ends with '/'. "
+                f"Use '{stripped}**' or '{stripped}*' instead.[/red]"
+            )
+            continue
+        excludes.append(stripped)
     return excludes
 
 

@@ -14,20 +14,12 @@ from git_recrypt.detector.base import (
 )
 
 K8S_SECRET_PATTERNS: Final[dict[str, re.Pattern[str]]] = {
-    "kind_secret": re.compile(r"^\s*kind:\s*Secret\s*$", re.MULTILINE),
+    "kind_secret": re.compile(r"^\s*kind:\s*Secret\s*(#.*)?$", re.MULTILINE),
     "type_opaque": re.compile(
-        r"^\s*type:\s*(Opaque|kubernetes\.io/.*)\s*$", re.MULTILINE
+        r"^\s*type:\s*(Opaque|kubernetes\.io/.*)\s*(#.*)?$", re.MULTILINE
     ),
-    "string_data": re.compile(r"^\s*stringData:\s*$", re.MULTILINE),
+    "string_data": re.compile(r"^\s*stringData:\s*(#.*)?$", re.MULTILINE),
 }
-
-K8S_PATH_PATTERNS: Final[tuple[str, ...]] = (
-    "values.yaml",
-    "values-*.yaml",
-    "**/*.env",
-    "**/secrets/**",
-    "**/secret/**",
-)
 
 _YAML_GLOB = "**/*.yaml"
 _PROFILE_YAML_THRESHOLD = 5
@@ -71,6 +63,10 @@ def _path_match_pattern(rel: str) -> str:
         return p.name
     if p.suffix == ".env":
         return "**/*.env"
+    for part in p.parts:
+        if part in {"secrets", "secret"}:
+            idx = p.parts.index(part)
+            return str(Path(*p.parts[: idx + 1])) + "/**"
     return rel
 
 

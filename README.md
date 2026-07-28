@@ -12,6 +12,7 @@ Retroactively introduce git-crypt to existing repos by rewriting history.
 - `git`
 - `git-crypt` (must be installed and in `PATH`)
 - `gpg` (GPG mode only -- secret keys must be available in your keyring)
+- `diff` (standard Unix tool, used for verification)
 
 ---
 
@@ -65,7 +66,7 @@ The manifest is a YAML file (default name: `git-recrypt.yaml`) that describes ho
 | `key` | yes | -- | Exactly one of `symmetric` or `gpg` (see below) |
 | `patterns` | yes | -- | List of gitattributes-style glob patterns for files to encrypt. At least one entry required. |
 | `repo` | no | `"./"` | Path to source repository. Relative paths are resolved against the manifest's parent directory. |
-| `introduce_at` | no | `"root"` | Where to introduce encryption. Currently only `"root"` (from first commit) is supported. `"first-match"` and SHA-based introduction points are accepted by the schema but not yet implemented. |
+| `introduce_at` | no | `"root"` | Where to introduce encryption. Currently only `"root"` (from first commit) is supported. `"first-match"` and SHA-based introduction points are rejected at validation time with a "not yet implemented" error. |
 | `branches` | no | `["HEAD"]` | Branches to rewrite. `HEAD` resolves to the source repo's current branch via `git symbolic-ref`. Fails fast if unresolvable. |
 | `exclude` | no | `[]` | Patterns to exclude from encryption. |
 | `detection_profile` | no | -- | Hint for the `detect` command. Values: `"generic"`, `"etckeeper"`, `"kubernetes"`. |

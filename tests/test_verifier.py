@@ -318,7 +318,7 @@ def test_missing_gitattributes_detected(sample_key_file: Path, tmp_path: Path) -
     map_dir = rewritten / ".git" / "filter-repo"
     map_dir.mkdir(parents=True, exist_ok=True)
     lines = ["old                                      new\n"]
-    for o, r in zip(orig_shas, rew_shas, strict=False):
+    for o, r in zip(orig_shas, rew_shas, strict=True):
         lines.append(f"{o} {r}\n")
     _ = (map_dir / "commit-map").write_text("".join(lines), encoding="utf-8")
 

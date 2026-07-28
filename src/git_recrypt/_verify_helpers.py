@@ -31,17 +31,30 @@ class PreflightResult:
     errors: tuple[str, ...]
 
 
-def run_preflight(
+def run_preflight(  # noqa: PLR0913
     rewritten_path: Path,
     matcher: PatternMatcher,
     key_file: Path | None,
     gpg_user_ids: list[str],  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
     lock_unlock_shas: list[str] | None = None,
+    branch: str = "",
 ) -> PreflightResult:
     """Run preflight phases: git-crypt status + lock/unlock roundtrips.
 
     lock_unlock_shas: rewritten commit SHAs to test lock/unlock at (tip + middle).
     """
+    if branch:
+        from git_recrypt._git import git_checkout  # noqa: PLC0415
+
+        try:
+            git_checkout(rewritten_path, branch)
+        except CryptoError as exc:
+            return PreflightResult(
+                passed=False,
+                encrypted_files_count=0,
+                identities_verified=0,
+                errors=(f"Phase 0 checkout {branch} failed: {exc}",),
+            )
     status_result = _phase_git_crypt_status(rewritten_path, matcher)
     if not status_result.passed:
         return status_result
@@ -162,8 +175,11 @@ def _test_lock_unlock_roundtrip(
     key_file: Path | None,
 ) -> str | None:
     """Lock, verify encrypted on disk, unlock, verify plaintext."""
-    with contextlib.suppress(CryptoError):
+    try:
         run_git_crypt_lock(rewritten_path)
+    except CryptoError as exc:
+        if "already locked" not in str(exc):
+            return f"lock failed: {exc}"
 
     encrypted_files = _collect_encrypted_disk_files_raw(rewritten_path, limit=5)
     if not encrypted_files:

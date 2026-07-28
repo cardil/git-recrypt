@@ -103,7 +103,7 @@ class GenericDetector(BaseDetector):
 
             for filename in filenames:
                 abs_path = Path(dirpath) / filename
-                rel_str = str(abs_path.relative_to(repo_path))
+                rel_str = abs_path.relative_to(repo_path).as_posix()
 
                 if exclude_spec.match_file(rel_str):
                     continue

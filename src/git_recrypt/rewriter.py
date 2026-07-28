@@ -352,8 +352,8 @@ def _merge_source_gitattributes(src: Path, tgt: Path, sha: str) -> None:
             continue
         parts = stripped.split()
         if len(parts) > 1 and any(
-            attr in {"filter", "-filter", "!filter", "diff", "-diff", "!diff"}
-            or attr.startswith(("filter=", "diff="))
+            attr.startswith(("filter=", "diff="))
+            and "git-crypt" not in attr
             for attr in parts[1:]
         ):
             continue
@@ -439,7 +439,7 @@ def _enrich_error_with_debug_hint(exc: RewriteError, src: Path) -> None:
 
 def _git_apply(tgt: Path, patch: bytes) -> None:
     ga = tgt / ".gitattributes"
-    ga_hidden = tgt / ".gitattributes.gcri-hidden"
+    ga_hidden = tgt / ".git" / "gcri-gitattributes"
     _ = ga.rename(ga_hidden)
     try:
         r = subprocess.run(  # noqa: S603
