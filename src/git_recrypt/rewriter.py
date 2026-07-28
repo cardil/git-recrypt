@@ -334,13 +334,13 @@ def _merge_source_gitattributes(src: Path, tgt: Path, sha: str) -> None:
         raw = _run(["show", f"{sha}:.gitattributes"], src)
         src_lines = raw.decode(errors="replace").splitlines()
     except RewriteError:
-        # .gitattributes may not exist at this SHA -- that's fine
-        return
+        src_lines = []
     ga = tgt / ".gitattributes"
     existing = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
     crypt_lines = [
         line for line in existing
         if "filter=git-crypt" in line or "diff=git-crypt" in line
+        or "!filter" in line or "!diff" in line
     ]
     filtered_src: list[str] = []
     for line in src_lines:

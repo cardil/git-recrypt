@@ -183,10 +183,11 @@ def step_branches() -> list[str]:
             "branch name",
         )
         branch = raw.strip() or "HEAD"
-        if not branch or branch == "HEAD":
+        if branch == "HEAD":
             if not raw.strip():
-                msg = "[yellow]Empty branch name. Falling back to HEAD.[/yellow]"
-                _console.print(msg)
+                _console.print(
+                    "[yellow]Empty branch name. Falling back to HEAD.[/yellow]"
+                )
             return ["HEAD"]
         if "," in branch:
             _console.print(
