@@ -1,0 +1,49 @@
+"""Shared executable discovery for git, gpg, diff, and git-crypt."""
+
+from __future__ import annotations
+
+import functools
+import shutil
+from typing import Final
+
+
+def find_git() -> str:
+    """Find git binary in PATH or raise RuntimeError."""
+    path = shutil.which("git")
+    if path is None:
+        msg = "git not found in PATH"
+        raise RuntimeError(msg)
+    return path
+
+
+def find_gpg() -> str:
+    """Find gpg binary in PATH or raise RuntimeError."""
+    path = shutil.which("gpg") or shutil.which("gpg2")
+    if path is None:
+        msg = "gpg not found in PATH; required for GPG mode"
+        raise RuntimeError(msg)
+    return path
+
+
+def find_diff() -> str | None:
+    """Find diff binary in PATH, or return None."""
+    return shutil.which("diff")
+
+
+@functools.cache
+def find_git_crypt() -> str:
+    """Find and cache absolute git-crypt path, or raise RuntimeError."""
+    path = shutil.which("git-crypt")
+    if path is None:
+        msg = "git-crypt not found in PATH; required for rewriting"
+        raise RuntimeError(msg)
+    from pathlib import Path  # noqa: PLC0415
+
+    return str(Path(path).resolve())
+
+
+GIT: Final[str] = find_git()
+# GIT_CRYPT is NOT validated at import time so that non-rewrite commands
+# (detect, init, verify) work without git-crypt installed.  Runtime callers
+# use find_git_crypt() which raises RuntimeError if missing.
+GIT_CRYPT: Final[str] = "git-crypt"
