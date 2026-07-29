@@ -261,7 +261,7 @@ def resolve_key_from_manifest(
         if kf == "generate":
             from git_recrypt._state import state_dir_for_repo  # noqa: PLC0415
 
-            export_to = Path(key_config.symmetric.export_to).resolve()
+            export_to = Path(key_config.symmetric.export_to).expanduser().resolve()
             repo_resolved = _repo_path.resolve()
             if repo_resolved in export_to.parents or export_to == repo_resolved:
                 safe_dir = state_dir_for_repo(_repo_path)
